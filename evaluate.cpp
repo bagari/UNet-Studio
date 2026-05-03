@@ -152,7 +152,7 @@ void evaluate_unet::read_file(void)
             eval[i].mask.clear();
             if(!eval[i].load_from_file<tipl::io::gz_nifti>(param.image_file_name[i]) ||
                !eval[i].handle_fov_pre(model->fov_strategy) ||
-               !eval[i].preproc(""))
+               !eval[i].preproc(model->preproc))
                 return error_msg = param.image_file_name[i] + " : " + eval[i].error_msg,aborted = true,void();
             data_ready[i] = true;
         }
@@ -230,7 +230,7 @@ void evaluate_unet::output(void)
                     continue;
 
                 if(!eval[cur_output].handle_fov_post() ||
-                   !eval[cur_output].command("softmax+create_mask"))
+                   !eval[cur_output].command(model->postproc))
                 {
                     error_msg = eval[cur_output].error_msg;
                     aborted = true;
@@ -448,7 +448,16 @@ void evaluate_unet::start(void)
     status = "initiating";
     stop();
     model->to(param.device);
-    model->eval();
+    model->eval();    
+    for(auto& m : model->modules())
+        if(auto bn = std::dynamic_pointer_cast<torch::nn::BatchNorm3dImpl>(m))
+        {
+            bn->eval();
+            bn->running_mean.zero_();
+            bn->running_var.fill_(1.0f);
+            if(bn->num_batches_tracked.defined())
+                bn->num_batches_tracked.zero_();
+        }
     aborted = false;
     running = true;
     error_msg.clear();
