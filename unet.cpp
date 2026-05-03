@@ -63,7 +63,7 @@ int UNet3dImpl::create_layer(torch::nn::Sequential& layers,const std::string& de
     if(params.count("bnorm"))
     {
         layers->push_back(torch::nn::BatchNorm3d(
-            torch::nn::BatchNorm3dOptions(in_c).affine(true).track_running_stats(false)));
+            torch::nn::BatchNorm3dOptions(in_c).affine(true).track_running_stats(true).eps(0.0)));
     }
     else
     {
