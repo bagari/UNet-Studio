@@ -41,20 +41,20 @@ void MainWindow::on_action_evaluate_open_images_triggered()
     settings.setValue("work_dir",QFileInfo(file[0]).absolutePath());
     evaluate_list << file;
     update_evaluate_list();
-    ui->evaluate->setEnabled(!evaluate.model->feature_string.empty());
+    ui->evaluate->setEnabled(!evaluate.model->architecture.empty());
 }
 
 
 void MainWindow::on_action_evaluate_copy_trained_network_triggered()
 {
     std::scoped_lock<std::mutex> lock(train.output_model_mutex);
-    if(train.output_model->feature_string.empty())
+    if(train.output_model->architecture.empty())
     {
         QMessageBox::critical(this,"Error","No trained network");
         return;
     }
     ui->evaluate_builtin_networks->setCurrentIndex(0);
-    evaluate.model = UNet3d(train.output_model->in_count,train.output_model->out_count,train.output_model->feature_string);
+    evaluate.model = UNet3d(train.output_model->in_count,train.output_model->out_count,train.output_model->architecture);
     evaluate.model->copy_from(*train.output_model);
     evaluate.model->eval();
     ui->evaluate_network_info->setText(QString("name: %1\n").arg(eval_name = train_name) + evaluate.model->get_info().c_str());
@@ -125,7 +125,6 @@ void MainWindow::on_evaluate_clicked()
 
     evaluate.param.device = ui->evaluate_device->currentIndex() >= 1 ? torch::Device(torch::kCUDA, ui->evaluate_device->currentIndex()-1):torch::Device(torch::kCPU);
     evaluate.param.image_file_name.clear();
-    evaluate.param.prob_threshold = ui->postproc_prob_threshold->value();
     for(auto s : evaluate_list)
         evaluate.param.image_file_name.push_back(s.toUtf8().constData());
 
@@ -133,7 +132,6 @@ void MainWindow::on_evaluate_clicked()
     ui->evaluate_progress->setEnabled(true);
     ui->evaluate_progress->setMaximum(evaluate_list.size());
     ui->evaluate_list2->clear();
-    evaluate.proc_strategy.output_format = ui->evaluate_output->currentIndex();
     evaluate.start();
     eval_timer->start();
 
@@ -272,15 +270,16 @@ void MainWindow::get_evaluate_views(QImage& view1,QImage& view2,float display_ra
         const auto& eval_label = evaluate.eval[currentRow].label;
         size_t eval_output_count = 1;
         eval_v2c2.set_range(0,1);
-        if(eval_label.empty())
+
+        if(ui->evaluate_output->currentIndex() != 0 && !evaluate.eval[currentRow].label_prob.empty())
         {
-            eval_output_count = evaluate.eval[currentRow].label_prob.depth()/evaluate.eval[currentRow].image_dim[2];
+            eval_output_count = evaluate.eval[currentRow].cur_count;
             view2 << eval_v2c2[tipl::volume2slice_scaled(
                            evaluate.eval[currentRow].label_prob.alias(eval_I1_buffer[currentRow].size()*ui->eval_label_slider->value(),
                                          eval_I1_buffer[currentRow].shape()),
                            ui->eval_view_dim->currentIndex(),slice_pos,display_ratio)];
         }
-        else
+        if(!eval_label.empty() && ui->evaluate_output->currentIndex() == 0)
         {
             if(eval_output_count == 1)
                 eval_v2c2.set_range(0,evaluate.model->out_count-1);
@@ -300,8 +299,6 @@ void MainWindow::get_evaluate_views(QImage& view1,QImage& view2,float display_ra
         }
         ui->eval_label_slider->setMaximum(eval_output_count-1);
         ui->eval_label_slider->setVisible(eval_output_count > 1);
-
-
     }
     else
     {

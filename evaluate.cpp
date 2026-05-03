@@ -129,6 +129,7 @@ bool evaluate_unet::load_atlas(const std::string& file_name)
 
 void evaluate_unet::read_file(void)
 {
+    eval.clear();
     eval.resize(param.image_file_name.size());
     data_ready = std::vector<bool> (param.image_file_name.size());
     read_file_thread.reset(new std::thread([=]()
@@ -146,10 +147,12 @@ void evaluate_unet::read_file(void)
 
             eval[i].model_dim = model->dim;
             eval[i].model_vs = model->voxel_size;
-            eval[i].in_count = model->in_count;
+            eval[i].in_count = eval[i].cur_count = model->in_count;
             eval[i].out_count = model->out_count;
-            eval[i].prob_threshold = param.prob_threshold;
-            if(!eval[i].load_from_file<tipl::io::gz_nifti>(param.image_file_name[i]) || !eval[i].preproc())
+            eval[i].mask.clear();
+            if(!eval[i].load_from_file<tipl::io::gz_nifti>(param.image_file_name[i]) ||
+               !eval[i].handle_fov_pre(model->fov_strategy) ||
+               !eval[i].preproc(""))
                 return error_msg = param.image_file_name[i] + " : " + eval[i].error_msg,aborted = true,void();
             data_ready[i] = true;
         }
@@ -197,13 +200,6 @@ void evaluate_unet::evaluate(void)
 
     }));
 }
-void evaluate_unet::proc_actions(const char* cmd,float param1,float param2)
-{
-    char is_label;
-    tipl::ml3d::postproc_actions(cmd,param1,param2,eval[cur_output].label_prob,eval[cur_output].fg_prob,eval[cur_output].image_dim,is_label);
-}
-
-
 
 extern std::vector<std::string> seg_template_list;
 extern std::vector<std::vector<std::string> > atlas_file_name_list;;
@@ -217,7 +213,6 @@ void evaluate_unet::output(void)
             exist_guard(bool& running_):running(running_){}
             ~exist_guard() { running = false;}
         } guard(running);
-
 
 
         try{
@@ -234,8 +229,13 @@ void evaluate_unet::output(void)
                 if(eval[cur_output].model_output.empty())
                     continue;
 
-                eval[cur_output].command("postproc+softmax+remove_bg_channel+create_mask");
-
+                if(!eval[cur_output].handle_fov_post() ||
+                   !eval[cur_output].command("softmax+create_mask"))
+                {
+                    error_msg = eval[cur_output].error_msg;
+                    aborted = true;
+                    return;
+                }
                 auto& cur_foreground_prob = eval[cur_output].fg_prob;
                 auto& cur_label_prob = eval[cur_output].label_prob;
 
@@ -245,9 +245,7 @@ void evaluate_unet::output(void)
                 switch(proc_strategy.output_format)
                 {
                     case 0: // 3D label
-
-                        eval[cur_output].argmax();
-
+                        //cur_label_prob = eval[cur_output].label;
                         if(!template_I.empty())
                         {
                             const auto& cur_shape = eval[cur_output].image_dim;
@@ -336,10 +334,6 @@ void evaluate_unet::output(void)
                     break;
 
                 }
-
-                eval[cur_output].model_input.clear();
-                eval[cur_output].model_output.clear();
-
             }
         }
         catch(const c10::Error& error)
@@ -362,6 +356,90 @@ void evaluate_unet::output(void)
         run_evaluation();
         join();
     }
+}
+
+
+
+template<typename image_type>
+void postproc_actions(const std::string& command,
+                      float param1,float param2,
+                      image_type& this_image,
+                      image_type& mask,
+                      const tipl::shape<3>& image_dim,
+                      char& is_label)
+{
+    auto out_channel = this_image.depth()/image_dim[2];
+    if(this_image.empty())
+        return;
+    tipl::out() << "run " << command;
+    if(command == "argmax")
+    {
+        this_image = tipl::argmax(this_image,mask.shape(),(mask > param1).data());
+        is_label = true;
+    }
+
+    // per channel operations
+    tipl::par_for(out_channel,[&](size_t label)
+    {
+        auto I = this_image.alias(image_dim.size()*label,image_dim);
+        if(command == "upper_threshold")
+        {
+            float upper_threshold_threshold = param1;
+            tipl::upper_threshold(I,upper_threshold_threshold);
+            is_label = false;
+            return;
+        }
+        if(command == "lower_threshold")
+        {
+            float lower_threshold_threshold = param1;
+            tipl::lower_threshold(I,lower_threshold_threshold);
+            is_label = false;
+            return;
+        }
+        if(command == "minus")
+        {
+            float minus_value = param1;
+            for(size_t i = 0,sz = I.size();i < sz;++i)
+                I[i] -= minus_value;
+            is_label = false;
+            return;
+        }
+
+        if(command == "defragment_each")
+        {
+            float defragment_each_threshold = param1;
+            tipl::image<3,char> mask(I.shape()),mask2;
+            for(size_t i = 0,sz = I.size();i < sz;++i)
+                mask[i] = (I[i] > defragment_each_threshold ? 1:0);
+            mask2 = mask;
+            tipl::morphology::defragment_by_size_ratio(mask);
+            for(size_t i = 0,sz = I.size();i < sz;++i)
+                if(!mask[i] && mask2[i])
+                I[i] = 0;
+            return;
+        }
+        if(command == "normalize_each")
+        {
+            tipl::normalize(I);
+            is_label = false;
+            return;
+        }
+        if(command == "gaussian_smoothing")
+        {
+            tipl::filter::gaussian(I);
+            is_label = false;
+            return;
+        }
+    });
+
+    tipl::error() << "unknown command " << command << std::endl;
+}
+
+
+void evaluate_unet::proc_actions(const char* cmd,float param1,float param2)
+{
+    char is_label;
+    postproc_actions(cmd,param1,param2,eval[cur_output].label_prob,eval[cur_output].fg_prob,eval[cur_output].image_dim,is_label);
 }
 
 
@@ -447,7 +525,6 @@ int eval(void)
             return tipl::error() << eval.error_msg,1;
     }
 
-    eval.param.prob_threshold = po.get("prob_threshold",eval.param.prob_threshold);
     eval.proc_strategy.output_format = po.get("output_format",eval.proc_strategy.output_format);
     eval.param.device = torch::Device(po.get("device",torch::hasCUDA() ? "cuda:0" :
                                                        (torch::hasHIP() ? "hip:0" :

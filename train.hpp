@@ -30,7 +30,6 @@ struct training_param{
 
 bool save_to_file(UNet3d& model,const char* file_name);
 bool load_from_file(UNet3d& model,const char* file_name);
-std::string show_structure(const UNet3d& model);
 bool read_image_and_label(const std::string& image_name,
                           const std::string& label_name,
                           size_t in_count,

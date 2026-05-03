@@ -357,16 +357,16 @@ void MainWindow::on_train_start_clicked()
         return;
     }
     tipl::progress p("initiate training");
-    if(train.model->feature_string.empty())
+    if(train.model->architecture.empty())
     {
         on_action_train_new_network_triggered();
-        if(train.model->feature_string.empty())
+        if(train.model->architecture.empty())
             return;
     }
     if(out_count != train.model->out_count)
     {
         tipl::out() << "different output channel noted. padding model output..." << std::endl;
-        auto new_model = UNet3d(in_count,out_count,train.model->feature_string);
+        auto new_model = UNet3d(in_count,out_count,train.model->architecture);
         new_model->copy_from(*train.model.get());
         train.model = new_model;
     }
@@ -744,10 +744,10 @@ void MainWindow::on_action_train_reorder_output_triggered()
 
     train.model->to(torch::kCPU);
 
-    auto old_model = UNet3d(train.model->in_count,train.model->out_count,train.model->feature_string);
+    auto old_model = UNet3d(train.model->in_count,train.model->out_count,train.model->architecture);
     old_model->copy_from(*train.model);
 
-    train.model = UNet3d(train.model->in_count,new_order.size(),train.model->feature_string);
+    train.model = UNet3d(train.model->in_count,new_order.size(),train.model->architecture);
     train.model->copy_from(*old_model);
 
     auto tensor_from = old_model->parameters();

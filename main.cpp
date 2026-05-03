@@ -151,27 +151,35 @@ int main(int argc, char *argv[])
 
 }
 
-
 bool load_from_file(UNet3d& model,const char* file_name)
 {
     tipl::io::gz_mat_read mat;
     tipl::out() << "load " << file_name;
     if(!mat.load_from_file(file_name))
         return tipl::error() << mat.error_msg,false;
-    std::string feature_string;
+    std::string architecture;
     std::vector<int> param({1,1});
-    if(!mat.read("param",param) || !mat.read("feature_string",feature_string))
-        return tipl::error() << "cannjot find param matrix or feature_string matrix",false;
+    if(!mat.read("channels",param) || !mat.read("architecture",architecture))
+        return tipl::error() << "invalid format",false;
     tipl::out() << "in channel:" << param[0];
     tipl::out() << "out channel:" << param[1];
-    tipl::out() << "feature_string:" << feature_string;
-    model = UNet3d(param[0],param[1],feature_string);
+    tipl::out() << "architecture:" << architecture;
+    model = UNet3d(param[0],param[1],architecture);
+    if(!mat.read_pointer("dimension",model->dim) ||
+       !mat.read_pointer("voxel_size",model->voxel_size) )
+        return tipl::error() << "invalid format",false;
     if(mat.read("report",model->report))
         tipl::out() << "report:" << model->report;
-    if(mat.read("voxel_size",model->voxel_size))
-        tipl::out() << "voxel_size:" << model->voxel_size;
-    if(mat.read("dimension",model->dim))
-        tipl::out() << "dimension:" << model->dim;
+    if(mat.read("fov_strategy",model->fov_strategy))
+        tipl::out() << "fov_strategy:" << model->fov_strategy;
+    if(mat.read("preproc",model->preproc))
+        tipl::out() << "preproc:" << model->preproc;
+    if(mat.read("postproc",model->postproc))
+        tipl::out() << "postproc:" << model->postproc;
+
+    tipl::out() << "voxel_size:" << model->voxel_size;
+    tipl::out() << "dimension:" << model->dim;
+
     {
         unsigned int r,c;
         if(mat.get_col_row("errors",r,c))
@@ -180,6 +188,7 @@ bool load_from_file(UNet3d& model,const char* file_name)
             mat.read("errors",model->errors);
         }
     }
+
     model->train();
     model->print_layers();
     int id = 0;
@@ -194,20 +203,17 @@ bool load_from_file(UNet3d& model,const char* file_name)
         std::copy(data,data+tensor.numel(),tensor.data_ptr<float>());
         ++id;
     }
-    id = 0;
-    for(const auto& buffer : model->buffers())
-    {
-        unsigned int row,col;
-        const auto* data = mat.read_as_type<float>((std::string("buffer")+std::to_string(id)).c_str(),row,col);
-        if(!data || row*col != buffer.numel())
-            return tipl::error() << "tensor size mismatch at " << (std::string("buffer")+std::to_string(id)) << " " <<
-                                   row*col << " not the expected of size " << buffer.numel(),false;
-        if(buffer.scalar_type() == torch::kFloat)
-            std::copy(data,data+buffer.numel(),buffer.data_ptr<float>());
-        if(buffer.scalar_type() == torch::kLong)
-            std::copy(data,data+buffer.numel(),buffer.data_ptr<int64_t>());
-        ++id;
-    }
+
+    for(auto& m : model->modules())
+        if(auto bn = std::dynamic_pointer_cast<torch::nn::BatchNorm3dImpl>(m))
+        {
+            if(bn->running_mean.defined())
+                bn->running_mean.zero_();
+            if(bn->running_var.defined())
+                bn->running_var.fill_(1.0f);
+            if(bn->num_batches_tracked.defined())
+                bn->num_batches_tracked.zero_();
+        }
     return true;
 }
 bool save_to_file(UNet3d& model,const char* file_name)
@@ -215,7 +221,7 @@ bool save_to_file(UNet3d& model,const char* file_name)
     tipl::io::gz_mat_write mat(file_name);
     if(!mat)
         return false;
-    mat.write("feature_string",model->feature_string);
+    mat.write("architecture",model->architecture);
     mat.write("report",model->report);
     mat.write("voxel_size",model->voxel_size);
     mat.write("dimension",model->dim);

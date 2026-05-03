@@ -14,7 +14,7 @@ struct UNet3dImpl : torch::nn::Module
 public:
     int in_count = 1;
     int out_count = 1;
-    std::string feature_string,report,error_msg;
+    std::string architecture,preproc,postproc,report,fov_strategy,error_msg;
 public:
     std::vector<float> errors;
     mutable std::mutex error_mutex;
@@ -27,15 +27,14 @@ public:
 public:
     tipl::vector<3> voxel_size = {1.0f,1.0f,1.0f};
     tipl::shape<3> dim = {192,224,192};
-    std::deque<torch::nn::Sequential> encoding,decoding,up;
+    std::deque<torch::nn::Sequential> encoding,decoding;
     std::vector<torch::nn::Sequential> output;
+    int create_layer(torch::nn::Sequential& layers,const std::string& def, int in_c);
 public:
     std::string get_info(void) const;
 public:
     UNet3dImpl(void){}
-    UNet3dImpl(int32_t in_count_,
-                int32_t out_count_,
-                std::string feature_string_);
+    UNet3dImpl(int32_t in_count_,int32_t out_count_,std::string);
     void copy_from(const UNet3dImpl& r);
     void add_gradient_from(const UNet3dImpl& r);
 

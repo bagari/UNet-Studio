@@ -641,13 +641,13 @@ void train_unet::start(void)
     for(int i = 1,gpu_count = torch::cuda::device_count();i<gpu_count;++i)
     {
         tipl::out() << "model added at cuda:" << i << std::endl;
-        auto new_model = UNet3d(model->in_count,model->out_count,model->feature_string);
+        auto new_model = UNet3d(model->in_count,model->out_count,model->architecture);
         new_model->to(torch::Device(torch::kCUDA,i));
         new_model->train();
         other_models.push_back(new_model);
     }
 
-    output_model = UNet3d(model->in_count,model->out_count,model->feature_string);
+    output_model = UNet3d(model->in_count,model->out_count,model->architecture);
     output_model->to(param.test_device);
     output_model->copy_from(*model);
     tipl::out() << "gpu count: " << torch::cuda::device_count();
@@ -754,7 +754,7 @@ int tra(void)
         if(po.get("out_count",train.model->out_count)!=train.model->out_count)
         {
             tipl::out() << "changing output channel\n";
-            auto new_model = UNet3d(train.model->in_count,po.get("out_count",train.model->out_count),train.model->feature_string);
+            auto new_model = UNet3d(train.model->in_count,po.get("out_count",train.model->out_count),train.model->architecture);
             new_model->copy_from(*train.model.get());
             train.model = new_model;
         }
@@ -767,12 +767,12 @@ int tra(void)
 
         size_t in_count = po.get("in_count",1);
         size_t out_count = po.get("out_count",label_count.size());
-        std::string feature_string = po.get("feature_string",default_feature(out_count));
+        std::string architecture = po.get("architecture",default_feature(out_count));
 
         try
         {
-            tipl::out() << "create new network with structure " << feature_string;
-            train.model = UNet3d(in_count,out_count,feature_string);
+            tipl::out() << "create new network with structure " << architecture;
+            train.model = UNet3d(in_count,out_count,architecture);
         }
         catch(...)
         {
