@@ -204,16 +204,6 @@ bool load_from_file(UNet3d& model,const char* file_name)
         ++id;
     }
 
-    for(auto& m : model->modules())
-        if(auto bn = std::dynamic_pointer_cast<torch::nn::BatchNorm3dImpl>(m))
-        {
-            if(bn->running_mean.defined())
-                bn->running_mean.zero_();
-            if(bn->running_var.defined())
-                bn->running_var.fill_(1.0f);
-            if(bn->num_batches_tracked.defined())
-                bn->num_batches_tracked.zero_();
-        }
     return true;
 }
 bool save_to_file(UNet3d& model,const char* file_name)
