@@ -39,7 +39,7 @@ public:
     UNet3dImpl(int32_t in_count_,int32_t out_count_,std::string);
     void copy_from(const UNet3dImpl& r);
     void add_gradient_from(const UNet3dImpl& r);
-
+    void create_optimizer(float learning_rate);
 public:
     std::vector<torch::Tensor> forward(torch::Tensor inputTensor);
 
