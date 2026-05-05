@@ -259,13 +259,13 @@ void visual_perception_augmentation(std::unordered_map<std::string,float>& optio
     // lighting
     if(apply("ambient"))
     {
-        float ambient_magnitude = one()*options["ambient_mag"];
+        float ambient_magnitude = range(0.0f,1.0f)*options["ambient_mag"];
         for(auto& image : input_images)
             ambient_light(image,ambient_magnitude);
     }
     if(apply("diffuse"))
     {
-        auto diffuse_dir = tipl::vector<3>(one()-0.5f,one()-0.5f,one()-0.5f);
+        auto diffuse_dir = tipl::vector<3>(range(-0.5f,0.5f),range(-0.5f,0.5f),range(-0.5f,0.5f));
         for(auto& image : input_images)
             diffuse_light(image,diffuse_dir,options["diffuse_mag"]);
     }
@@ -294,15 +294,15 @@ void visual_perception_augmentation(std::unordered_map<std::string,float>& optio
                     resolution*range(1.0f/options["aspect_ratio"],options["aspect_ratio"]),
                     0.0f,0.0f,0.0f};
         auto trans = tipl::transformation_matrix<float>(transform,image_shape,tipl::v(1.0f,1.0f,1.0f),image_shape,tipl::v(1.0f,1.0f,1.0f));
-        tipl::vector<3> perspective((one()-0.5f)*options["perspective"]/float(image_shape[0]),
-                                    (one()-0.5f)*options["perspective"]/float(image_shape[1]),
-                                    (one()-0.5f)*options["perspective"]/float(image_shape[2]));
+        tipl::vector<3> perspective(range(-0.5f,0.5f)*options["perspective"]/float(image_shape[0]),
+                                    range(-0.5f,0.5f)*options["perspective"]/float(image_shape[1]),
+                                    range(-0.5f,0.5f)*options["perspective"]/float(image_shape[2]));
         auto center = tipl::vector<3>(image_shape)/2.0f;
 
 
         tipl::image<3,tipl::vector<3> > displaced(image_shape);
         if(options["lens_distortion"] != 0.0f)
-            lens_distortion(displaced,one()*options["lens_distortion"]);
+            lens_distortion(displaced,range(0.0f,1.0f)*options["lens_distortion"]);
         if(apply("distortion"))
         {
             size_t num = size_t(range(1.0f,options["distortion_count"]+1.0f));
@@ -327,7 +327,7 @@ void visual_perception_augmentation(std::unordered_map<std::string,float>& optio
             if(!interp.get_location(image_shape,pos))
                 return;
             if(is_label)
-                tipl::estimate<tipl::nearest>(label,pos,output_label[index]);
+                tipl::estimate<tipl::majority>(label,pos,output_label[index]);
             else
                 interp.estimate(label,output_label[index]);
             for(int c = 0;c < input_images.size();++c)
@@ -375,7 +375,7 @@ void visual_perception_augmentation(std::unordered_map<std::string,float>& optio
                 {
                     tipl::resample(image,background,tipl::transformation_matrix<float>(args[iter],image_shape,tipl::v(1.0f,1.0f,1.0f),image_shape,tipl::v(1.0f,1.0f,1.0f)));
                     tipl::lower_threshold(background,0.0f);
-                    tipl::normalize(background,options["rubber_stamping_mag"]);
+                    tipl::normalize(background,range(0.0f,1.0f)*options["rubber_stamping_mag"]);
                     for(size_t i = 0;i < image_out.size();++i)
                         if(!output_label[i])
                             blend_fun(image_out[i],background[i]);
@@ -410,7 +410,7 @@ void visual_perception_augmentation(std::unordered_map<std::string,float>& optio
                 background[pos] = v-std::floor(v);
             });
 
-            tipl::normalize(background,options["perlin_texture_mag"]);
+            tipl::normalize(background,range(0.0f,1.0f)*options["perlin_texture_mag"]);
             for(auto& image : output_images)
             for(size_t i = 0;i < image.size();++i)
                 if(!output_label[i])
