@@ -254,14 +254,10 @@ void train_unet::read_file(void)
         tipl::out() << "a total of " << param.image_file_name.size() << " training dataset\n";
         tipl::out() << "a total of " << param.test_image_file_name.size() << " testing dataset\n";
 
-        for(int read_id = 0,sz = param.test_image_file_name.size();read_id<sz&&!aborted;++read_id)
+        for(int read_id = 0,sz = param.test_image_file_name.size();read_id<sz && !aborted;++read_id)
         {
             while(pause)
-            {
-                std::this_thread::sleep_for(100ms);
-                if(aborted)
-                    return;
-            }
+                if(aborted) return; else std::this_thread::sleep_for(100ms);
 
             reading_status = "reading "+std::filesystem::path(param.test_image_file_name[read_id]).filename().string()+" and "+std::filesystem::path(param.test_label_file_name[read_id]).filename().string();
 
@@ -334,11 +330,8 @@ void train_unet::read_file(void)
             }
 
             while(file_ready[thread])
-            {
-                std::this_thread::sleep_for(100ms);
-                if(aborted)
-                    return;
-            }
+                if(aborted) return; else std::this_thread::sleep_for(100ms);
+
             in_file[thread].swap(image);
             out_file[thread].swap(label);
             in_file_seed[thread] = seed;
@@ -379,11 +372,8 @@ void train_unet::read_file(void)
                 visual_perception_augmentation(param.options,in_data_thread,out_data_thread,param.is_label,model->dim,seed);
 
                 while(data_ready[thread]||pause)
-                {
-                    std::this_thread::sleep_for(100ms);
-                    if(aborted)
-                        return;
-                }
+                    if(aborted) return; else std::this_thread::sleep_for(100ms);
+
                 in_data[thread].swap(in_data_thread);
                 out_data[thread].swap(out_data_thread);
                 in_data_read_id[thread] = read_id;
@@ -436,47 +426,12 @@ void train_unet::train(void)
             model->report += "using a batch size of "+std::to_string(param.batch_size)+". ";
             model->report += "Optimization employed an initial learning rate of "+std::to_string(param.learning_rate)+" using SGD with Nesterov momentum.";
 
-            std::vector<torch::Tensor> decay_params,no_decay_params;
-            for(auto& p:model->named_parameters())
+            while(cur_epoch<param.epoch && !aborted)
             {
-                if(p.key().find("bias")!=std::string::npos||p.key().find("norm")!=std::string::npos||p.key().find("bn")!=std::string::npos||p.key().find("out_conv")!=std::string::npos)
-                    no_decay_params.push_back(p.value());
-                else
-                    decay_params.push_back(p.value());
-            }
-
-            double base_wd = 3e-5;
-            std::vector<torch::optim::OptimizerParamGroup> groups;
-
-            auto opt_d = std::make_unique<torch::optim::SGDOptions>(param.learning_rate);
-            opt_d->momentum(0.99);
-            opt_d->nesterov(true);
-            opt_d->weight_decay(base_wd);
-
-            auto opt_nd = std::make_unique<torch::optim::SGDOptions>(param.learning_rate);
-            opt_nd->momentum(0.99);
-            opt_nd->nesterov(true);
-            opt_nd->weight_decay(0.0);
-
-            groups.push_back(torch::optim::OptimizerParamGroup(decay_params,std::move(opt_d)));
-            groups.push_back(torch::optim::OptimizerParamGroup(no_decay_params,std::move(opt_nd)));
-
-            auto optimizer = std::make_shared<torch::optim::SGD>(groups,torch::optim::SGDOptions(param.learning_rate));
-
-            if(po.has("network")&&cur_epoch&&std::filesystem::exists(po.get("network")+".opt"))
-            {
-                torch::load(*optimizer,po.get("network")+".opt");
-                tipl::out() << "optimizer state found. training is resumed at epoch " << cur_epoch;
-            }
-
-            size_t cur_data_index = 0;
-            for(;cur_epoch<param.epoch&&!aborted;++cur_epoch)
-            {
+                size_t cur_data_index = cur_epoch*param.batch_size;
                 training_status = "training";
-                double poly = std::pow(1.0-(double)cur_epoch/param.epoch,0.9);
-                double cur_lr = param.learning_rate*poly;
-
-                for(auto& group:optimizer->param_groups())
+                double cur_lr = param.learning_rate*std::pow(1.0-(double)cur_epoch/param.epoch,0.9);
+                for(auto& group:model->optimizer->param_groups())
                 {
                     auto& opt = static_cast<torch::optim::SGDOptions&>(group.options());
                     opt.lr(cur_lr);
@@ -495,7 +450,7 @@ void train_unet::train(void)
                 std::atomic<int> next_batch_idx{0};
 
                 std::vector<std::thread> gpu_threads;
-                std::mutex error_mutex;
+                std::mutex out_mutex;
 
                 for(int thread_id = 0;thread_id < active_threads;++thread_id)
                 {
@@ -514,12 +469,9 @@ void train_unet::train(void)
                                     break;
 
                                 size_t data_idx = (cur_data_index+b)%data_ready.size();
-                                while(!data_ready[data_idx] || pause)
-                                {
-                                    std::this_thread::sleep_for(10ms);
-                                    if(aborted)
-                                        return;
-                                }
+                                while(!data_ready[data_idx])
+                                    if(aborted) return; else std::this_thread::sleep_for(100ms);
+
 
                                 auto target_cpu = torch::from_blob(
                                     out_data[data_idx].data(),
@@ -614,20 +566,8 @@ void train_unet::train(void)
                         }
                         catch(const c10::Error& e)
                         {
-                            std::scoped_lock<std::mutex> lock(error_mutex);
+                            std::scoped_lock<std::mutex> lock(out_mutex);
                             tipl::error() << (error_msg = std::string("GPU thread ") + std::to_string(thread_id) + ": " + e.what());
-                            aborted = true;
-                        }
-                        catch(const std::exception& e)
-                        {
-                            std::scoped_lock<std::mutex> lock(error_mutex);
-                            tipl::error() << (error_msg = std::string("GPU thread ") + std::to_string(thread_id) + ": " + e.what());
-                            aborted = true;
-                        }
-                        catch(...)
-                        {
-                            std::scoped_lock<std::mutex> lock(error_mutex);
-                            tipl::error() << (error_msg = "unknown error in GPU thread " + std::to_string(thread_id));
                             aborted = true;
                         }
                     });
@@ -635,8 +575,6 @@ void train_unet::train(void)
 
                 for(auto& t:gpu_threads)
                     t.join();
-
-                cur_data_index += param.batch_size;
 
                 if(aborted)
                     return;
@@ -651,23 +589,30 @@ void train_unet::train(void)
 
                 torch::nn::utils::clip_grad_norm_(model->parameters(), 12.0);
 
-                optimizer->step();
-                optimizer->zero_grad();
+                model->optimizer->step();
+                model->optimizer->zero_grad();
 
-                while(cur_validation_epoch<cur_epoch||pause)
+                // wait for validation thread to finish last epoch
+                training_status = "waiting for validation";
+                while(cur_validation_epoch < cur_epoch || pause)
+                    if(aborted) return; else std::this_thread::sleep_for(100ms);
+
                 {
-                    std::this_thread::sleep_for(10ms);
-                    if(aborted)
-                        return;
+                    std::scoped_lock<std::mutex> lock(output_model_mutex);
+                    output_model->copy_from(*model);
                 }
-                std::scoped_lock<std::mutex> lock(output_model_mutex);
-                output_model->copy_from(*model);
 
-                if(po.has("network")&&(cur_epoch+1)%100==0)
+                ++cur_epoch;
+
+                if((!model_path.empty() && (cur_epoch % 500 == 0)) || save_model_now)
                 {
-                    std::string net_path = po.get("network");
-                    save_to_file(model,net_path.c_str());
-                    torch::save(*optimizer,net_path+".opt");
+                    tipl::out() << "saving model to " << (save_model_now ? save_model_now_path : model_path);
+                    // wait for validation error to come in
+                    while(cur_validation_epoch < cur_epoch)
+                        if(aborted) return; else std::this_thread::sleep_for(100ms);
+                    save_to_file(model,save_model_now ? save_model_now_path.c_str() : model_path.c_str());
+                    torch::save(*(model->optimizer),(save_model_now ? save_model_now_path : model_path)+".opt");
+                    save_model_now = false;
                 }
             }
         }
@@ -710,11 +655,8 @@ void train_unet::validate(void)
             for(;cur_validation_epoch<param.epoch&&!aborted;++cur_validation_epoch)
             {
                 while(cur_epoch<=cur_validation_epoch||!test_data_ready||pause)
-                {
-                    std::this_thread::sleep_for(100ms);
-                    if(aborted)
-                        return;
-                }
+                    if(aborted) return; else std::this_thread::sleep_for(100ms);
+
                 std::vector<float> errors;
                 if(!test_in_tensor.empty())
                 {
@@ -727,11 +669,6 @@ void train_unet::validate(void)
                         errors.push_back(ce_v = ce.item().toFloat());
                         errors.push_back(dice_v = dice.item().toFloat());
                         errors.push_back(mse_v = mse.item().toFloat());
-                    }
-                    {
-                        std::scoped_lock<std::mutex> lock(error_mutex);
-                        for(size_t i = 0,sz = errors.size();i<sz;++i)
-                            model->errors.push_back(errors[i]);
                     }
                 }
                 {
@@ -746,9 +683,12 @@ void train_unet::validate(void)
                         str += "-lr:"+std::to_string(cur_lr);
                         if(cur_validation_epoch>start_validation_epoch)
                         {
-                            auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(std::chrono::steady_clock::now()-start_time).count();
-                            auto total_sec = elapsed*param.epoch/(cur_validation_epoch-start_validation_epoch);
-                            str += " total:"+std::to_string(total_sec/3600)+"h"+std::to_string((total_sec%3600)/60)+"m";
+                            auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(
+                                               std::chrono::steady_clock::now()-start_time).count();
+                            auto done = cur_validation_epoch-start_validation_epoch;
+                            auto fmt = [](auto s){return std::to_string(s/3600)+"h"+std::to_string((s%3600)/60)+"m";};
+                            str += " rem:" + fmt(elapsed*(param.epoch-cur_validation_epoch)/done) +
+                                   " / total:" + fmt(elapsed*param.epoch/done);
                         }
                         size_t copy_len = std::min(str.length(),out.length()-2);
                         std::copy(str.begin(),str.begin()+copy_len,out.begin()+1);
@@ -764,6 +704,13 @@ void train_unet::validate(void)
                         out[to_chart(errors[2])] = 'M';
                     }
                     tipl::out() << out << cur_validation_epoch;
+
+                    std::scoped_lock<std::mutex> lock(error_mutex);
+                    for(auto each : errors)
+                    {
+                        model->errors.push_back(each);
+                        output_model->errors.push_back(each);
+                    }
                 }
             }
         }
@@ -792,7 +739,6 @@ void train_unet::validate(void)
 
 void train_unet::start(void)
 {
-    tipl::progress p("starting training");
     reading_status = augmentation_status = training_status = validation_status = "initializing";
     {
         stop();
@@ -802,18 +748,51 @@ void train_unet::start(void)
         error_msg.clear();
     }
 
+    tipl::progress p("starting training");
+    tipl::out() << model->get_info();
+
     if(param.image_file_name.empty())
         return error_msg = "please specify the training data",aborted = true,void();
 
-    if(model->errors.empty()&&!model->init_dimension(param.image_file_name[0]))
-        return error_msg = model->error_msg,aborted = true,void();
-
-    cur_epoch = model->errors.size()/3;
-    cur_validation_epoch = cur_epoch;
+    cur_validation_epoch = cur_epoch = model->errors.size()/3;
 
     model->to(param.device);
     model->train();
 
+    if(model->errors.empty() || !model->optimizer.get())
+    {
+        tipl::progress prog("initialize optimizer");
+        std::vector<torch::Tensor> decay_params,no_decay_params;
+        for(auto& p : model->named_parameters())
+        {
+            auto v = p.value();
+            const auto& name = p.key();
+            bool no_decay = name.find("bias") != std::string::npos || v.dim() <= 1; // norm affine weights and all bias-like parameters
+            if(no_decay)
+                no_decay_params.push_back(v);
+            else
+                decay_params.push_back(v);
+        }
+
+        double base_wd = 3e-5;
+        std::vector<torch::optim::OptimizerParamGroup> groups;
+
+        auto opt_d = std::make_unique<torch::optim::SGDOptions>(param.learning_rate);
+        opt_d->momentum(0.99);
+        opt_d->nesterov(true);
+        opt_d->weight_decay(base_wd);
+
+        auto opt_nd = std::make_unique<torch::optim::SGDOptions>(param.learning_rate);
+        opt_nd->momentum(0.99);
+        opt_nd->nesterov(true);
+        opt_nd->weight_decay(0.0);
+
+        groups.push_back(torch::optim::OptimizerParamGroup(decay_params,std::move(opt_d)));
+        groups.push_back(torch::optim::OptimizerParamGroup(no_decay_params,std::move(opt_nd)));
+        model->optimizer = std::make_shared<torch::optim::SGD>(groups,torch::optim::SGDOptions(param.learning_rate));
+    }
+
+    tipl::out() << "gpu count: " << torch::cuda::device_count();
     other_models.clear();
     for(int i = 1,gpu_count = torch::cuda::device_count();i<gpu_count;++i)
     {
@@ -827,7 +806,8 @@ void train_unet::start(void)
     output_model = UNet3d(model->in_count,model->out_count,model->architecture);
     output_model->to(param.test_device);
     output_model->copy_from(*model);
-    tipl::out() << "gpu count: " << torch::cuda::device_count();
+    output_model->errors = model->errors;
+
 
     read_file();
     train();
@@ -866,17 +846,14 @@ void train_unet::stop(void)
 }
 
 
-std::string get_network_path(void)
+std::string get_model_path(void)
 {
-    std::string network = po.get("network");
-    if(!tipl::ends_with(network,"nz"))
-        network += ".nz";
-    if(!std::filesystem::exists(network)&&std::filesystem::exists(po.exec_path+"/unet/"+network))
-    {
-        network = po.exec_path+"/unet/"+network;
-        po.set("network",network);
-    }
-    return network;
+    std::string model_path = po.get("model");
+    if(!tipl::ends_with(model_path,"nz"))
+        model_path += ".nz";
+    if(!std::filesystem::exists(model_path) && std::filesystem::exists(po.exec_path+"/unet/"+model_path))
+        po.set("model",model_path = po.exec_path+"/unet/"+model_path);
+    return model_path;
 }
 
 std::string default_feature(int out_count)
@@ -930,22 +907,16 @@ int tra(void)
             tipl::out() << std::filesystem::path(train.param.image_file_name[i]).filename().string() << "=>" << std::filesystem::path(train.param.label_file_name[i]).filename().string();
     }
 
-    auto network = get_network_path();
-    if(std::filesystem::exists(network))
+    train.model_path = get_model_path();
+    if(std::filesystem::exists(train.model_path))
     {
-        tipl::out() << "loading existing network " << network;
-        if(!load_from_file(train.model,network.c_str()))
-            return tipl::error() << "failed to load model from " << network,1;
+        tipl::out() << "loading existing model " << train.model_path;
+        if(!load_from_file(train.model,train.model_path.c_str()))
+            return tipl::error() << "failed to load model from " << train.model_path,1;
 
         tipl::out() << train.model->get_info();
 
-        if(po.get("out_count",train.model->out_count)!=train.model->out_count)
-        {
-            tipl::out() << "changing output channel\n";
-            auto new_model = UNet3d(train.model->in_count,po.get("out_count",train.model->out_count),train.model->architecture);
-            new_model->copy_from(*train.model.get());
-            train.model = new_model;
-        }
+
     }
     else
     {
@@ -997,10 +968,8 @@ int tra(void)
     if(!train.error_msg.empty())
         return tipl::error() << train.error_msg,1;
 
-    {
-        tipl::out() << "save model to " << po.get("network","model.nz");
-        if(!save_to_file(train.model,po.get("network").c_str()))
-            tipl::error() << "failed to save network to " << po.get("network");
-    }
+    tipl::out() << "save model to " << train.model_path;
+    if(!save_to_file(train.model,train.model_path.c_str()))
+        return tipl::error() << "failed to save network to " << train.model_path,1;
     return 0;
 }
