@@ -497,7 +497,7 @@ bool evaluate_unet::save_to_file(size_t currentRow,const char* file_name)
 }
 
 bool load_from_file(UNet3d& model,const char* file_name);
-std::string get_network_path(void);
+std::string get_model_path(void);
 int eval(void)
 {
     static evaluate_unet eval;
@@ -514,7 +514,7 @@ int eval(void)
     if((eval.param.image_file_name = po.get_files("source")).empty())
         return tipl::error() << "no file specified at --source",1;
 
-    auto network = get_network_path();
+    auto network = get_model_path();
     {
         if(!std::filesystem::exists(network))
             return tipl::error() << "cannot find the network file " << network,1;
