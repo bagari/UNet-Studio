@@ -27,7 +27,7 @@ public:
 public:
     tipl::vector<3> voxel_size = {1.0f,1.0f,1.0f};
     tipl::shape<3> dim = {192,224,192};
-    std::deque<torch::nn::Sequential> encoding,decoding;
+    std::deque<torch::nn::Sequential> encoding,decoding,decoding_tail;
     std::vector<torch::nn::Sequential> output;
     int create_layer(torch::nn::Sequential& layers,const std::string& def, int in_c);
 public:
