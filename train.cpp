@@ -29,6 +29,7 @@ bool read_image_and_label(const std::string& image_name,const std::string& label
 
         std::string second_modality;
         if(std::filesystem::exists(second_modality = tipl::replace(image_name,"T1w","T2w")) ||
+           std::filesystem::exists(second_modality = tipl::replace(image_name,"T1W","T2W")) ||
            std::filesystem::exists(second_modality = tipl::replace(image_name,"t1w","t2w")) ||
            std::filesystem::exists(second_modality = tipl::replace(image_name,"t1w","t2f")))
         {
@@ -36,6 +37,7 @@ bool read_image_and_label(const std::string& image_name,const std::string& label
             tipl::shape<3> dim2;
             if((in2 >> dim2) && dim2 == image_dim)
             {
+                tipl::out() << "adding second modality: " << second_modality;
                 input.resize(image_dim.multiply(tipl::shape<3>::z,2));
                 auto I = input.alias(image_dim.size(),image_dim);
                 in2 >> I;
@@ -917,7 +919,6 @@ int tra(void)
 
         try
         {
-            tipl::out() << "create new network with structure " << architecture;
             train.model = UNet3d(in_count,out_count,architecture);
             tipl::out() << "dim: " << (train.model->dim = tipl::ml3d::round_up_size(I.shape()));
             tipl::out() << "vs: " << (train.model->voxel_size = vs);
@@ -932,7 +933,7 @@ int tra(void)
         train.param.set_weight(po.get("label_weight"));
 
     {
-        tipl::out() << "visual augmentation options";
+        tipl::progress prog("visual augmentation options");
         QFile data(":/options.txt");
         if(!data.open(QIODevice::ReadOnly|QIODevice::Text))
             return tipl::error() << "cannot load options",1;
