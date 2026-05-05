@@ -90,6 +90,9 @@ UNet3dImpl::UNet3dImpl(int32_t in_count_,
             out_count(out_count_),
             architecture(architecture_)
 {
+    fov_strategy = "align_top";
+    preproc = "";
+    postproc = "softmax+remove_bg_channel+create_mask+argmax";
     std::vector<std::vector<std::string>> enc_tokens, dec_tokens;
     {
         std::vector<std::string> all_lines(tipl::split_in_lines(architecture_));
@@ -147,8 +150,7 @@ UNet3dImpl::UNet3dImpl(int32_t in_count_,
     std::stringstream ss;
     ss << "The implemented model is a 3D U-Net designed to map "
        << in_count << " input channel" << (in_count>1?"s":"") << " to "
-       << out_count << " output classes using " << enc_tokens.size() << " resolution levels. "
-       << "The encoder pathway utilizes a architecture hierarchy of " << architecture;
+       << out_count << " output classes using " << enc_tokens.size() << " resolution levels. ";
     report = ss.str();
 }
 
@@ -224,6 +226,9 @@ void UNet3dImpl::copy_from(const UNet3dImpl& r)
     voxel_size = r.voxel_size;
     dim = r.dim;
     report = r.report;
+    fov_strategy = r.fov_strategy;
+    postproc = r.postproc;
+    preproc = r.preproc;
     errors = r.errors;
 }
 
