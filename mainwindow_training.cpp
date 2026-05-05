@@ -129,15 +129,13 @@ void MainWindow::on_action_train_open_files_triggered()
     );
     if (fileNames.isEmpty())
         return;
-    {
-         tipl::io::gz_nifti nii(fileNames[0].toUtf8().constData(),std::ios::in);
-         if(!nii)
-         {
-             QMessageBox::critical(this,"ERROR",nii.error_msg.c_str());
-             return;
-         }
-         in_count = nii.dim(4);    
-    }    
+
+    if(!(tipl::io::gz_nifti(fileNames[0].toUtf8().constData(),std::ios::in) >> model_vs >> model_dim >>
+        [&](auto& e){QMessageBox::critical(this,"ERROR",e.c_str());}))
+        return;
+
+    in_count = 1;
+    model_dim = tipl::ml3d::round_up_size(model_dim);
 
     settings.setValue("work_dir",QFileInfo(fileNames[0]).absolutePath());
     image_last_added_indices.clear();
@@ -262,6 +260,8 @@ void MainWindow::on_action_train_new_network_triggered()
     at::globalContext().setDeterministicCuDNN(true);
     qputenv("CUDNN_DETERMINISTIC", "1");
     train.model = UNet3d(in_count,out_count,feature.toUtf8().constData());
+    train.model->voxel_size = model_vs;
+    train.model->dim = model_dim;
     ui->model_info->setText(QString("name: %1\n").arg(train_name) + train.model->get_info().c_str());
     ui->model_report->setPlainText(train.model->report.c_str());
     has_network();
