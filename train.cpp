@@ -1,3 +1,8 @@
+#include <random>
+#include <array>
+#include <cmath>
+#include <algorithm>
+#include <limits>
 #include <QFile>
 #include <QTextStream>
 #include "train.hpp"
@@ -8,53 +13,50 @@ using namespace std::chrono_literals;
 bool load_from_file(UNet3d& model,const char* file_name);
 bool save_to_file(UNet3d& model,const char* file_name);
 
-bool read_image_and_label(const std::string& image_name,const std::string& label_name,size_t in_count,tipl::image<3>& input,tipl::image<3>& label,tipl::shape<3>& image_shape)
+bool read_image_and_label(const std::string& image_name,const std::string& label_name,tipl::image<3>& input,tipl::image<3>& label)
 {
     std::scoped_lock<std::mutex> lock(tipl::io::nifti_do_not_show_process);
     tipl::matrix<4,4,float> image_t((tipl::identity_matrix()));
+    tipl::shape<3> image_dim;
     {
         tipl::io::gz_nifti nii(image_name,std::ios::in);
         if(!nii)
             return tipl::error() << nii.error_msg,false;
-        if(nii.dim(4)!=in_count)
-            return tipl::error() << "image channel number does not match model input channel",false;
+        if(nii.dim(4)!= 1)
+            return tipl::error() << "cannot use multiple channel image",false;
 
-        nii.get_image_dimension(image_shape);
-        input.resize(tipl::shape<3>(image_shape.width(),image_shape.height(),image_shape.depth()*in_count));
+        nii >> image_dim >> image_t >> input;
 
-        size_t img_sz = image_shape.size();
-        for(int c = 0;c<in_count;++c)
+        std::string second_modality;
+        if(std::filesystem::exists(second_modality = tipl::replace(image_name,"T1w","T2w")) ||
+           std::filesystem::exists(second_modality = tipl::replace(image_name,"t1w","t2w")) ||
+           std::filesystem::exists(second_modality = tipl::replace(image_name,"t1w","t2f")))
         {
-            auto I = input.alias(img_sz*c,image_shape);
-            nii >> I;
+            tipl::io::gz_nifti in2(second_modality,std::ios::in);
+            tipl::shape<3> dim2;
+            if((in2 >> dim2) && dim2 == image_dim)
+            {
+                input.resize(image_dim.multiply(tipl::shape<3>::z,2));
+                auto I = input.alias(image_dim.size(),image_dim);
+                in2 >> I;
+            }
         }
-        nii >> image_t;
     }
 
     tipl::io::gz_nifti nii(label_name,std::ios::in);
     if(!nii)
         return tipl::error() << nii.error_msg,false;
-
     label.clear();
-    label.resize(image_shape);
-    if(nii.dim(4)>1)
-    {
-        for(size_t index = 1,sz_dim4 = nii.dim(4);index<=sz_dim4;++index)
-        {
-            tipl::image<3> I(image_shape);
-            nii.to_space<tipl::majority>(I,image_t);
-            for(size_t pos = 0,sz = I.size();pos<sz;++pos)
-                if(I[pos])
-                    label[pos] = index;
-        }
-    }
-    else
-        nii.to_space<tipl::majority>(label,image_t);
+    label.resize(image_dim);
+    nii.to_space<tipl::majority>(label,image_t);
     return true;
 }
 
-void preprocessing(tipl::image<3>& image,tipl::image<3>& label,tipl::shape<3> from_dim,tipl::shape<3> to_dim)
+
+
+void preprocessing(tipl::image<3>& image,tipl::image<3>& label,tipl::shape<3> to_dim)
 {
+    tipl::shape<3> from_dim(label.shape());
     if(from_dim!=to_dim)
     {
         auto shift = tipl::vector<3,int>(to_dim)-tipl::vector<3,int>(from_dim);
@@ -75,6 +77,125 @@ void preprocessing(tipl::image<3>& image,tipl::image<3>& label,tipl::shape<3> fr
             tipl::normalize(to);
         }
         new_image.swap(image);
+    }
+}
+void simulate_modality(tipl::image<3>& t1w, // stores T1w or [T1w,T2w]
+                       const tipl::image<3>& label,
+                       unsigned int max_label,
+                       unsigned int seed)
+{
+    // Assumption:
+    // t1w stores either T1w or concatenated [T1w,T2w].
+    // T1w and T2w are already normalized to [0,1].
+    // label stores integer-like labels: 0..max_label.
+    constexpr size_t term_count = 20;
+
+    const size_t n_voxel = label.size();
+    const bool has_t2 = t1w.size() >= n_voxel*2;
+    tipl::image<3,float> tissue(label.shape());
+
+    tipl::uniform_dist<int> rand_int(seed);
+    tipl::uniform_dist<float> rand_float(0.0f,1.0f,seed+1);
+
+
+    auto get_t2 = [&](size_t i)
+    {
+        return t1w[n_voxel+i];
+    };
+
+    // label-derived tissue modality
+    std::vector<float> lut(max_label+1,0.4f);
+    for(unsigned int i = 1;i <= max_label;++i)
+        lut[i] = 0.4f + rand_float()*0.2f;
+
+    for(size_t i = 0;i < n_voxel;++i)
+        tissue[i] = lut[std::clamp<int>(int(label[i]),0,int(max_label))];
+
+    tipl::filter::gaussian(tissue);
+    tipl::filter::gaussian(tissue);
+
+    struct term_type
+    {
+        unsigned char a,b,c,d,e,f;
+        float w;
+    };
+
+    std::array<term_type,term_count> terms;
+    for(auto& t : terms)
+    {
+        do
+        {
+            t.a = uint8_t(rand_int(4));                 // T1
+            t.b = has_t2 ? uint8_t(rand_int(4)) : 0;    // optional T2
+            t.c = uint8_t(rand_int(4));                 // tissue
+        }
+        while(t.a+t.b+t.c == 0);
+
+        t.d = uint8_t(rand_int(has_t2 ? 3 : 4));        // 1-T1
+        t.e = has_t2 ? uint8_t(rand_int(3)) : 0;        // optional 1-T2
+        t.f = uint8_t(rand_int(has_t2 ? 3 : 4));        // 1-tissue
+        t.w = rand_float();
+    }
+
+    float gamma = 0.6f + 1.2f*rand_float();
+
+    float mn = std::numeric_limits<float>::max();
+    float mx = -std::numeric_limits<float>::max();
+
+    for(size_t i = 0;i < n_voxel;++i)
+    {
+        const float x = t1w[i]; // original T1 before overwrite
+        const bool mask = x > 0.02f || (has_t2 && get_t2(i) > 0.02f);
+
+        if(!mask)
+        {
+            t1w[i] = 0.0f;
+            continue;
+        }
+
+        float z = tissue[i];
+        float rx = 1.0f-x;
+        float rz = 1.0f-z;
+
+        float px[4] = {1.0f,x,x*x,x*x*x};
+        float pz[4] = {1.0f,z,z*z,z*z*z};
+        float qx[4] = {1.0f,rx,rx*rx,rx*rx*rx};
+        float qz[4] = {1.0f,rz,rz*rz,rz*rz*rz};
+
+        float py[4] = {1.0f,1.0f,1.0f,1.0f};
+        float qy[3] = {1.0f,1.0f,1.0f};
+
+        if(has_t2)
+        {
+            float y = get_t2(i);
+            float ry = 1.0f-y;
+            py[1] = y;
+            py[2] = y*y;
+            py[3] = y*y*y;
+            qy[1] = ry;
+            qy[2] = ry*ry;
+        }
+
+        float s = 0.0f;
+        for(const auto& t : terms)
+            s += t.w*px[t.a]*py[t.b]*pz[t.c]*qx[t.d]*qy[t.e]*qz[t.f];
+
+        t1w[i] = std::pow(s,gamma);
+        if(label[i])
+        {
+            mn = std::min(mn,t1w[i]);
+            mx = std::max(mx,t1w[i]);
+        }
+    }
+
+    if(has_t2)
+        t1w.resize(label.shape());
+
+    if(mx > mn)
+    {
+        t1w -= mn;
+        t1w *= 1.0f/(mx-mn);
+        tipl::upper_lower_threshold(t1w,0.0f,1.0f);
     }
 }
 
@@ -145,15 +266,15 @@ void train_unet::read_file(void)
             reading_status = "reading "+std::filesystem::path(param.test_image_file_name[read_id]).filename().string()+" and "+std::filesystem::path(param.test_label_file_name[read_id]).filename().string();
 
             tipl::image<3> input_image,input_label;
-            tipl::shape<3> input_shape;
-            if(!read_image_and_label(param.test_image_file_name[read_id],param.test_label_file_name[read_id],model->in_count,input_image,input_label,input_shape))
+            if(!read_image_and_label(param.test_image_file_name[read_id],
+                                     param.test_label_file_name[read_id],input_image,input_label))
             {
                 error_msg = "cannot read image or label data for "+std::filesystem::path(param.test_image_file_name[read_id]).filename().string();
                 aborted = true;
                 return;
             }
 
-            preprocessing(input_image,input_label,input_shape,model->dim);
+            preprocessing(input_image,input_label,model->dim);
 
             if(model->out_count==1)
                 tipl::normalize(input_label);
@@ -189,15 +310,14 @@ void train_unet::read_file(void)
             if(train_image[read_id].empty())
             {
                 reading_status = "reading "+std::filesystem::path(param.image_file_name[read_id]).filename().string()+" and "+std::filesystem::path(param.label_file_name[read_id]).filename().string();
-                tipl::shape<3> image_shape;
-                if(!read_image_and_label(param.image_file_name[read_id],param.label_file_name[read_id],model->in_count,image,label,image_shape))
+                if(!read_image_and_label(param.image_file_name[read_id],param.label_file_name[read_id],image,label))
                 {
                     error_msg = "cannot read image or label data for "+std::filesystem::path(param.image_file_name[read_id]).filename().string();
                     aborted = true;
                     return;
                 }
                 reading_status = "preprocessing";
-                preprocessing(image,label,image_shape,model->dim);
+                preprocessing(image,label,model->dim);
                 if(!param.is_label)
                     tipl::normalize(label);
                 if(train_image_is_template[read_id])
@@ -244,6 +364,9 @@ void train_unet::read_file(void)
                 tipl::image<3> in_data_thread,out_data_thread;
                 size_t read_id = in_file_read_id[thread];
                 size_t seed = in_file_seed[thread];
+
+                simulate_modality(in_file[thread],out_file[thread],model->out_count,seed);
+
                 in_data_thread.swap(in_file[thread]);
                 out_data_thread.swap(out_file[thread]);
                 file_ready[thread] = false;
@@ -372,90 +495,144 @@ void train_unet::train(void)
                 std::atomic<int> next_batch_idx{0};
 
                 std::vector<std::thread> gpu_threads;
-                for(int thread_id = 0;thread_id<active_threads;++thread_id)
+                std::mutex error_mutex;
+
+                for(int thread_id = 0;thread_id < active_threads;++thread_id)
                 {
                     gpu_threads.emplace_back([&,thread_id]()
                     {
-                        auto cur_model = (thread_id==0)?model:other_models[thread_id-1];
-                        auto dev = cur_model->device();
-                        torch::DeviceGuard guard(dev);
-                        while(!aborted)
+                        try
                         {
-                            int b = next_batch_idx.fetch_add(1);
-                            if(b>=param.batch_size)
-                                break;
-                            size_t data_idx = (cur_data_index+b)%data_ready.size();
-                            while(!data_ready[data_idx]||pause)
-                            {
-                                std::this_thread::sleep_for(10ms);
-                                if(aborted)
-                                    return;
-                            }
+                            auto cur_model = thread_id == 0 ? model : other_models[thread_id-1];
+                            auto dev = cur_model->device();
+                            torch::DeviceGuard guard(dev);
 
-                            auto target = torch::from_blob(out_data[data_idx].data(),{1,int(cur_model->dim[2]),int(cur_model->dim[1]),int(cur_model->dim[0])}).to(torch::kLong).to(dev,true);
-                            auto in = torch::from_blob(in_data[data_idx].data(),{1,cur_model->in_count,int(cur_model->dim[2]),int(cur_model->dim[1]),int(cur_model->dim[0])}).clone().to(dev,true);
-                            data_ready[data_idx] = false;
-
-                            torch::Tensor total_loss;
+                            while(!aborted)
                             {
+                                int b = next_batch_idx.fetch_add(1);
+                                if(b >= param.batch_size)
+                                    break;
+
+                                size_t data_idx = (cur_data_index+b)%data_ready.size();
+                                while(!data_ready[data_idx] || pause)
+                                {
+                                    std::this_thread::sleep_for(10ms);
+                                    if(aborted)
+                                        return;
+                                }
+
+                                auto target_cpu = torch::from_blob(
+                                    out_data[data_idx].data(),
+                                    {1,int(cur_model->dim[2]),int(cur_model->dim[1]),int(cur_model->dim[0])}).clone().to(torch::kLong);
+
+                                auto in_cpu = torch::from_blob(
+                                    in_data[data_idx].data(),
+                                    {1,cur_model->in_count,int(cur_model->dim[2]),int(cur_model->dim[1]),int(cur_model->dim[0])}).clone();
+
+                                data_ready[data_idx] = false;
+
+                                auto target = target_cpu.to(dev);
+                                auto in = in_cpu.to(dev);
+
                                 auto outputs = cur_model->forward(in);
                                 in = torch::Tensor();
 
                                 torch::Tensor active_target = target;
                                 target = torch::Tensor();
 
+                                torch::Tensor total_loss;
                                 size_t out_sz = outputs.size();
+
                                 float weight_sum = 0.0f;
-                                for(size_t k = 0;k<out_sz;++k)
+                                for(size_t k = 0;k < out_sz;++k)
                                     weight_sum += 1.0f/(1 << k);
+
                                 float inv_weight_sum = 1.0f/weight_sum;
 
-                                for(size_t k = 0;k<out_sz;++k)
+                                for(size_t k = 0;k < out_sz;++k)
                                 {
-                                    if(k>0)
+                                    if(k > 0)
                                     {
-                                        int64_t d = active_target.size(1) >> 1,h = active_target.size(2) >> 1,w = active_target.size(3) >> 1;
-                                        std::vector<int64_t> target_size = {d,h,w};
+                                        int64_t d = active_target.size(1) >> 1;
+                                        int64_t h = active_target.size(2) >> 1;
+                                        int64_t w = active_target.size(3) >> 1;
+
+                                        if(d <= 0 || h <= 0 || w <= 0)
+                                            throw std::runtime_error("deep supervision target size became zero");
+
                                         auto temp_float = active_target.unsqueeze(1).to(torch::kFloat32);
-                                        auto opt = torch::nn::functional::InterpolateFuncOptions().size(target_size).mode(torch::kNearest);
-                                        temp_float = torch::nn::functional::interpolate(temp_float,opt);
-                                        active_target = temp_float.squeeze(1).to(torch::kLong);
+                                        auto opt = torch::nn::functional::InterpolateFuncOptions()
+                                            .size(std::vector<int64_t>{d,h,w})
+                                            .mode(torch::kNearest);
+
+                                        active_target = torch::nn::functional::interpolate(temp_float,opt)
+                                            .squeeze(1)
+                                            .to(torch::kLong);
                                     }
+
+                                    if(!outputs[k].defined())
+                                        throw std::runtime_error("undefined deep supervision output at level " + std::to_string(k));
+
+                                    if(outputs[k].size(1) != cur_model->out_count)
+                                        throw std::runtime_error(
+                                            "output channel mismatch at level " + std::to_string(k) +
+                                            ": tensor has " + std::to_string(outputs[k].size(1)) +
+                                            ", out_count is " + std::to_string(cur_model->out_count));
+
+                                    auto max_label = active_target.max().item<int64_t>();
+                                    if(max_label >= cur_model->out_count)
+                                        throw std::runtime_error(
+                                            "target label out of range at level " + std::to_string(k) +
+                                            ": max label=" + std::to_string(max_label) +
+                                            ", out_count=" + std::to_string(cur_model->out_count));
 
                                     auto [ce,dice,mse] = calc_losses(outputs[k],active_target,cur_model->out_count);
                                     outputs[k] = torch::Tensor();
 
                                     float norm_weight = (1.0f/(1 << k))*inv_weight_sum;
 
-                                    bool initialized = false;
-                                    auto level_loss = ce;
+                                    torch::Tensor level_loss;
+                                    if(param.cost_ce)
+                                        level_loss = level_loss.defined() ? level_loss + ce : ce;
+                                    if(param.cost_dice)
+                                        level_loss = level_loss.defined() ? level_loss + dice : dice;
+                                    if(param.cost_mse)
+                                        level_loss = level_loss.defined() ? level_loss + mse : mse;
 
-                                    auto add_to_level = [&](auto component)
-                                    {
-                                        if (!initialized)
-                                        {
-                                            level_loss = component;
-                                            initialized = true;
-                                        }
-                                        else
-                                            level_loss += component;
-                                    };
-
-                                    if (param.cost_ce)   add_to_level(ce);
-                                    if (param.cost_dice) add_to_level(dice);
-                                    if (param.cost_mse)  add_to_level(mse);
+                                    if(!level_loss.defined())
+                                        level_loss = ce;
 
                                     level_loss *= norm_weight;
-                                    if (total_loss.defined())
-                                        total_loss += level_loss;
-                                    else
-                                        total_loss = level_loss;
+                                    total_loss = total_loss.defined() ? total_loss + level_loss : level_loss;
                                 }
+
+                                if(!total_loss.defined())
+                                    throw std::runtime_error("undefined total loss");
+
+                                total_loss.backward();
                             }
-                            total_loss.backward();
+                        }
+                        catch(const c10::Error& e)
+                        {
+                            std::scoped_lock<std::mutex> lock(error_mutex);
+                            tipl::error() << (error_msg = std::string("GPU thread ") + std::to_string(thread_id) + ": " + e.what());
+                            aborted = true;
+                        }
+                        catch(const std::exception& e)
+                        {
+                            std::scoped_lock<std::mutex> lock(error_mutex);
+                            tipl::error() << (error_msg = std::string("GPU thread ") + std::to_string(thread_id) + ": " + e.what());
+                            aborted = true;
+                        }
+                        catch(...)
+                        {
+                            std::scoped_lock<std::mutex> lock(error_mutex);
+                            tipl::error() << (error_msg = "unknown error in GPU thread " + std::to_string(thread_id));
+                            aborted = true;
                         }
                     });
                 }
+
                 for(auto& t:gpu_threads)
                     t.join();
 
@@ -705,7 +882,19 @@ std::string get_network_path(void)
 
 std::string default_feature(int out_count)
 {
-    return "16x16+32x32+64x64+128x128+256x256+256x256";
+    auto out = "conv" + std::to_string(out_count) + ",ks1,stride1";
+    return
+            "conv16,ks3,stride1+norm,leaky_relu+conv16,ks3,stride1+norm,leaky_relu\n"
+            "conv32,ks3,stride2+norm,leaky_relu+conv32,ks3,stride1+norm,leaky_relu\n"
+            "conv64,ks3,stride2+norm,leaky_relu+conv64,ks3,stride1+norm,leaky_relu\n"
+            "conv128,ks3,stride2+norm,leaky_relu+conv128,ks3,stride1+norm,leaky_relu\n"
+            "conv256,ks3,stride2+norm,leaky_relu+conv256,ks3,stride1+norm,leaky_relu\n"
+            "conv256,ks3,stride2+norm,leaky_relu+conv256,ks3,stride1+norm,leaky_relu+conv_trans256,ks2,stride2\n"
+            "conv256,ks3,stride1+norm,leaky_relu+conv256,ks3,stride1+norm,leaky_relu+" + out + "+conv_trans128,ks2,stride2\n" +
+            "conv128,ks3,stride1+norm,leaky_relu+conv128,ks3,stride1+norm,leaky_relu+" + out + "+conv_trans64,ks2,stride2\n" +
+            "conv64,ks3,stride1+norm,leaky_relu+conv64,ks3,stride1+norm,leaky_relu+" + out + "+conv_trans32,ks2,stride2\n" +
+            "conv32,ks3,stride1+norm,leaky_relu+conv32,ks3,stride1+norm,leaky_relu+" + out + "+conv_trans16,ks2,stride2\n" +
+            "conv16,ks3,stride1+norm,leaky_relu+conv16,ks3,stride1+norm,leaky_relu+" + out;
 }
 
 int tra(void)
@@ -766,7 +955,7 @@ int tra(void)
             return tipl::error() << "cannot open the label file" << train.param.label_file_name[0],1;
 
         size_t in_count = po.get("in_count",1);
-        size_t out_count = po.get("out_count",label_count.size());
+        size_t out_count = po.get("out_count",label_count.size()+1);
         std::string architecture = po.get("architecture",default_feature(out_count));
 
         try
