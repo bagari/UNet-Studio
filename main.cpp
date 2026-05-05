@@ -203,17 +203,6 @@ bool load_from_file(UNet3d& model,const char* file_name)
         std::copy(data,data+tensor.numel(),tensor.data_ptr<float>());
         ++id;
     }
-
-
-    if(!model->errors.empty())
-    {
-        tipl::out() << "current epoch: " << model->errors.size();
-        if(std::filesystem::exists(std::string(file_name)+".opt"))
-        {
-            tipl::out() << "loading existing optimizer " << std::string(file_name)+".opt";
-            torch::load(*(model->optimizer),std::string(file_name)+".opt");
-        }
-    }
     return true;
 }
 bool save_to_file(UNet3d& model,const char* file_name)
