@@ -211,35 +211,23 @@ bool save_to_file(UNet3d& model,const char* file_name)
     tipl::io::gz_mat_write mat(file_name);
     if(!mat)
         return false;
+    mat.write("channels",std::vector<int>({model->in_count,model->out_count}));
     mat.write("architecture",model->architecture);
-    mat.write("report",model->report);
-    mat.write("voxel_size",model->voxel_size);
     mat.write("dimension",model->dim);
+    mat.write("voxel_size",model->voxel_size);
+    mat.write("report",model->report);
+    mat.write("fov_strategy",model->fov_strategy);
+    mat.write("preproc",model->preproc);
+    mat.write("postproc",model->postproc);
     mat.write("errors",model->errors,3);
-    mat.write("param",std::vector<int>({model->in_count,model->out_count}));
     int id = 0;
+    mat.apply_slope = true;
+    mat.min_size_for_mask_slope = 1024;
     for(const auto& tensor : model->parameters())
     {
-        auto cpu_tensor = tensor.to(torch::kCPU);
-        mat.write((std::string("tensor")+std::to_string(id)).c_str(),cpu_tensor.data_ptr<float>(),cpu_tensor.numel()/cpu_tensor.sizes().front(),cpu_tensor.sizes().front());
-        ++id;
-    }
-    id = 0;
-    for(const auto& buffer : model->buffers())
-    {
-        auto cpu_buffer = buffer.to(torch::kCPU);
-        if(!cpu_buffer.numel())
-            continue;
-        if (cpu_buffer.scalar_type() == torch::kFloat)
-            mat.write((std::string("buffer") + std::to_string(id)).c_str(),
-                          cpu_buffer.data_ptr<float>(),
-                          cpu_buffer.numel() / cpu_buffer.sizes().front(),
-                          cpu_buffer.sizes().front());
-        else
-            if (cpu_buffer.scalar_type() == torch::kLong)
-                mat.write((std::string("buffer") + std::to_string(id)).c_str(),cpu_buffer.data_ptr<int64_t>(),1,1);
-            else
-                tipl::warning() << "buffer not saved due to type " << int(cpu_buffer.scalar_type());
+        auto cpu_tensor = tensor.to(torch::kCPU).contiguous();
+        mat.write<tipl::io::sloped>("tensor"+std::to_string(id),cpu_tensor.data_ptr<float>(),
+                                    cpu_tensor.numel()/cpu_tensor.sizes().front(),cpu_tensor.sizes().front());
         ++id;
     }
     return true;
