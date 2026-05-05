@@ -37,9 +37,9 @@ void MainWindow::on_action_open_training_setting_triggered()
     ui->batch_size->setValue(ini.value("batch_size",ui->batch_size->value()).toInt());
     ui->learning_rate->setValue(ini.value("learning_rate",ui->learning_rate->value()).toFloat());
 
-    if(!ini.value("network_dir").toString().isEmpty())
+    if(!ini.value("model_dir").toString().isEmpty())
     {
-        auto fileName = ini.value("network_dir").toString() + "/" + ini.value("network_file").toString() + ".nz";
+        auto fileName = ini.value("model_dir").toString() + "/" + ini.value("model_file").toString() + ".nz";
         if(QFileInfo(fileName).exists())
             load_network(fileName);
     }
@@ -74,8 +74,8 @@ void MainWindow::on_action_save_training_setting_triggered()
     ini.setValue("learning_rate",ui->learning_rate->value());
     if(!train.model->errors.empty())
     {
-        ini.setValue("network_dir",settings.value("network_dir").toString());
-        ini.setValue("network_file",settings.value("network_file").toString());
+        ini.setValue("model_dir",settings.value("model_dir").toString());
+        ini.setValue("model_file",settings.value("model_file").toString());
     }
     option->save(ini);
     ini.sync();
@@ -274,8 +274,8 @@ void MainWindow::load_network(QString fileName)
         QMessageBox::critical(this,"Error","Invalid file format");
         return;
     }
-    settings.setValue("network_dir",QFileInfo(fileName).absolutePath());
-    settings.setValue("network_file",train_name = QFileInfo(fileName.remove(".nz")).fileName());
+    settings.setValue("model_dir",QFileInfo(fileName).absolutePath());
+    settings.setValue("model_file",train_name = QFileInfo(fileName.remove(".nz")).fileName());
     ui->model_info->setText(QString("name: %1\n").arg(train_name) + train.model->get_info().c_str());
     ui->model_report->setPlainText(train.model->report.c_str());
     has_network();
@@ -285,8 +285,8 @@ void MainWindow::load_network(QString fileName)
 void MainWindow::on_action_train_open_network_triggered()
 {
     QString fileName = QFileDialog::getOpenFileName(this,"Open network file",
-                                                settings.value("network_dir").toString() + "/" +
-                                                settings.value("network_file").toString() + ".nz","Network files (*nz);;All files (*)");
+                                                settings.value("model_dir").toString() + "/" +
+                                                settings.value("model_file").toString() + ".nz","Network files (*nz);;All files (*)");
     if(fileName.isEmpty())
         return;
     load_network(fileName);
@@ -295,15 +295,27 @@ void MainWindow::on_action_train_open_network_triggered()
 void MainWindow::on_action_train_save_network_triggered()
 {
     QString fileName = QFileDialog::getSaveFileName(this,"Save network file",
-                                                settings.value("network_dir").toString() + "/" +
+                                                settings.value("model_dir").toString() + "/" +
                                                 train_name + ".nz","Network files (*nz);;All files (*)");
-    std::scoped_lock<std::mutex> lock(train.output_model_mutex);
-    if(!fileName.isEmpty() && save_to_file(train.output_model,fileName.toUtf8().constData()))
+    if(fileName.isEmpty())
+        return;
+
+    if(train.running)
     {
-        QMessageBox::information(this,"","Network Saved");
-        settings.setValue("network_dir",QFileInfo(fileName).absolutePath());
-        settings.setValue("network_file",train_name = QFileInfo(fileName.remove(".nz")).fileName());
+        train.save_model_now_path = fileName.toUtf8().constData();
+        train.save_model_now = true;
+        QMessageBox::information(this,"","Model will be saved at the end of the current epoch");
     }
+    else
+    {
+        std::scoped_lock<std::mutex> lock(train.output_model_mutex);
+        train.output_model->to(torch::kCPU);
+        save_to_file(train.output_model,fileName.toUtf8().constData());
+        train.output_model->to(train.param.test_device);
+        QMessageBox::information(this,"","Model Saved");
+    }
+    settings.setValue("model_dir",QFileInfo(fileName).absolutePath());
+    settings.setValue("model_file",train_name = QFileInfo(fileName.remove(".nz")).fileName());
 }
 
 
@@ -340,7 +352,11 @@ void MainWindow::on_actionApply_Label_Weights_triggered()
 extern tipl::program_option<tipl::out> po;
 void MainWindow::on_train_start_clicked()
 {
-
+    if(train.running)
+    {
+        train.pause = !train.pause;
+        return;
+    }
 
     train.param.batch_size = ui->batch_size->value();
     train.param.learning_rate = ui->learning_rate->value();
@@ -351,11 +367,6 @@ void MainWindow::on_train_start_clicked()
     for(auto& each : option->treemodel->name_data_mapping)
         train.param.options[each.first.toUtf8().constData()] = each.second->getValue().toFloat();
 
-    if(train.running)
-    {
-        train.pause = !train.pause;
-        return;
-    }
     tipl::progress p("initiate training");
     if(train.model->architecture.empty())
     {
@@ -390,9 +401,7 @@ void MainWindow::on_train_start_clicked()
     }
     train.param.device = ui->train_device->currentIndex() >= 1 ? torch::Device(torch::kCUDA, ui->train_device->currentIndex()-1):torch::Device(torch::kCPU);
     train.start();
-    ui->train_prog->setValue(1);
     timer->start();
-    ui->train_start->setText(train.pause ? "Resume":"Pause");
     error_view_epoch = 0;
     error_scene << QImage();
 
@@ -400,6 +409,10 @@ void MainWindow::on_train_start_clicked()
     ui->model_info->setText(train.model->get_info().c_str());
 
     has_network();
+
+    ui->train_prog->setValue(1);
+    ui->train_start->setText("Pause");
+
 }
 
 void MainWindow::on_train_stop_clicked()
@@ -528,9 +541,9 @@ void MainWindow::training()
     }
 
     ui->train_start->setText(train.running ? (train.pause ? "Resume":"Pause") : "Start");
-    ui->batch_size->setEnabled(!train.running || train.pause);
-    ui->learning_rate->setEnabled(!train.running || train.pause);
-    ui->epoch->setEnabled(!train.running || train.pause);
+    ui->batch_size->setEnabled(!train.running);
+    ui->learning_rate->setEnabled(!train.running);
+    ui->epoch->setEnabled(!train.running);
 
     ui->action_train_open_files->setEnabled(!train.running);
     ui->train_open_files->setEnabled(!train.running);
@@ -541,6 +554,9 @@ void MainWindow::training()
     ui->action_train_open_network->setEnabled(!train.running);
     ui->train_open_network->setEnabled(!train.running);
     ui->action_train_new_network->setEnabled(!train.running);
+
+    ui->train_save_network->setEnabled(!train.running || train.pause);
+    ui->action_train_save_network->setEnabled(!train.running || train.pause);
     ui->train_new_network->setEnabled(!train.running);
     ui->action_train_auto_match_label_files->setEnabled(!train.running);
 
