@@ -964,7 +964,7 @@ int tra(void)
             tipl::out() << "create new network with structure " << architecture;
             train.model = UNet3d(in_count,out_count,architecture);
             tipl::out() << "dim: " << (train.model->dim = tipl::ml3d::round_up_size(I.shape()));
-            tipl::out() << "vs: " << (train.model->vs = vs);
+            tipl::out() << "vs: " << (train.model->voxel_size = vs);
         }
         catch(...)
         {
