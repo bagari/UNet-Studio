@@ -154,26 +154,6 @@ UNet3dImpl::UNet3dImpl(int32_t in_count_,
     report = ss.str();
 }
 
-bool UNet3dImpl::init_dimension(const std::string& template_file)
-{
-    tipl::io::gz_nifti in(template_file,std::ios::in);
-    if(!in)
-    {
-        error_msg = in.error_msg;
-        return false;
-    }
-    in.toLPS();
-    in >> std::tie(dim,voxel_size);
-    dim = tipl::ml3d::round_up_size(dim);
-    voxel_size = voxel_size[0];
-
-    tipl::out() << "input dim: " << dim << " voxel size:" << voxel_size;
-    std::stringstream ss;
-    ss << " The input dimension was " << dim << ". The voxel size was " << voxel_size;
-    report += ss.str();
-    return true;
-}
-
 std::vector<torch::Tensor> UNet3dImpl::forward(torch::Tensor inputTensor)
 {
     std::vector<torch::Tensor> encodingTensors(encoding.size() - 1);
@@ -229,7 +209,6 @@ void UNet3dImpl::copy_from(const UNet3dImpl& r)
     fov_strategy = r.fov_strategy;
     postproc = r.postproc;
     preproc = r.preproc;
-    errors = r.errors;
 }
 
 void UNet3dImpl::add_gradient_from(const UNet3dImpl& r)
