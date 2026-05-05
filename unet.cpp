@@ -113,24 +113,37 @@ UNet3dImpl::UNet3dImpl(int32_t in_count_,
 
     decoding.resize(dec_tokens.size());
     output.resize(dec_tokens.size());
+    decoding_tail.resize(dec_tokens.size());
 
-    for(int level = dec_tokens.size() - 1; level >= 0; --level)
+    auto out_token = dec_tokens.back().back();
+    for(int level = dec_tokens.size()-1;level >= 0;--level)
     {
-        const auto& tokens = dec_tokens[dec_tokens.size() - 1 - level];
+        const auto& tokens = dec_tokens[dec_tokens.size()-1-level];
 
-        channel = create_layer(decoding[level],tokens[0],channel + skip_channels[level]);
+        bool after_out = false;
+        channel += skip_channels[level];
 
-        for(size_t t = 1; t < tokens.size(); ++t)
+        for(size_t t = 0;t < tokens.size();++t)
         {
-            if(t == tokens.size()-1 && tokens[t] == dec_tokens.back().back())
+            if(tokens[t] == out_token)
+            {
                 create_layer(output[level],tokens[t],channel);
-            else
-                channel = create_layer(decoding[level],tokens[t],channel);
+                after_out = true;
+                continue;
+            }
+
+            channel = create_layer(after_out ? decoding_tail[level] : decoding[level],
+                                   tokens[t],
+                                   channel);
         }
+
         register_module("decode"+std::to_string(level),decoding[level]);
-        if (!output[level]->is_empty())
+        if(!output[level]->is_empty())
             register_module("output"+std::to_string(level),output[level]);
+        if(!decoding_tail[level]->is_empty())
+            register_module("decode_tail"+std::to_string(level),decoding_tail[level]);
     }
+
     std::stringstream ss;
     ss << "The implemented model is a 3D U-Net designed to map "
        << in_count << " input channel" << (in_count>1?"s":"") << " to "
@@ -170,14 +183,17 @@ std::vector<torch::Tensor> UNet3dImpl::forward(torch::Tensor inputTensor)
         if (level < encoding.size() - 1)
             encodingTensors[level] = inputTensor;
     }
-    for(int level=encoding.size()-2; level>=0; level--)
+    for(int level = int(encoding.size())-2;level >= 0;--level)
     {
-        torch::Tensor cat_tensor = torch::cat({encodingTensors[level],inputTensor}, 1);
-        inputTensor = torch::Tensor();
+        inputTensor = torch::cat({encodingTensors[level],inputTensor},1);
         encodingTensors[level] = torch::Tensor();
-        inputTensor = decoding[level]->forward(cat_tensor);
-        if (!output[level]->is_empty())
+
+        inputTensor = decoding[level]->forward(inputTensor);
+
+        if(!output[level]->is_empty())
             results[level] = output[level]->forward(inputTensor);
+        if(!decoding_tail[level]->is_empty())
+            inputTensor = decoding_tail[level]->forward(inputTensor);
     }
 
     return results;
