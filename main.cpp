@@ -109,9 +109,9 @@ int run_cmd(void)
         return 1;
     if(!po.check("action"))
         return 1;
-    if(!po.has("network"))
+    if(!po.has("model"))
     {
-        tipl::error() << "please specify --network";
+        tipl::error() << "please specify --model";
         return 1;
     }
     if(po.get("action") == std::string("train"))
@@ -204,6 +204,16 @@ bool load_from_file(UNet3d& model,const char* file_name)
         ++id;
     }
 
+
+    if(!model->errors.empty())
+    {
+        tipl::out() << "current epoch: " << model->errors.size();
+        if(std::filesystem::exists(std::string(file_name)+".opt"))
+        {
+            tipl::out() << "loading existing optimizer " << std::string(file_name)+".opt";
+            torch::load(*(model->optimizer),std::string(file_name)+".opt");
+        }
+    }
     return true;
 }
 bool save_to_file(UNet3d& model,const char* file_name)
