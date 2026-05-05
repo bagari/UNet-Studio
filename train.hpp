@@ -30,12 +30,11 @@ struct training_param{
 
 bool save_to_file(UNet3d& model,const char* file_name);
 bool load_from_file(UNet3d& model,const char* file_name);
-bool read_image_and_label(const std::string& image_name,
-                          const std::string& label_name,
-                          size_t in_count,
-                          tipl::image<3>& input,
-                          tipl::image<3>& label,
-                          tipl::shape<3>& image_shape);
+bool read_image_and_label(const std::string& image_name,const std::string& label_name,tipl::image<3>& input,tipl::image<3>& label);
+void simulate_modality(tipl::image<3>& t1w, // store t1w or [t1w t2w]
+                       const tipl::image<3>& label,
+                       unsigned int max_label,
+                       unsigned int seed);
 void visual_perception_augmentation(std::unordered_map<std::string,float>& options,
                           tipl::image<3>& image,
                           tipl::image<3>& label,
