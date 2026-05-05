@@ -581,22 +581,26 @@ void MainWindow::on_list1_currentRowChanged(int currentRow)
         pos_index = 0.5f;
     if(currentRow >= 0 && currentRow < image_list.size())
     {
-        tipl::shape<3> shape;
-        if(!read_image_and_label(image_list[currentRow].toUtf8().constData(),label_list[currentRow].toUtf8().constData(),in_count,I1,I2,shape))
+        if(!std::filesystem::exists(image_list[currentRow].toUtf8().constData()) ||
+           !read_image_and_label(image_list[currentRow].toUtf8().constData(),label_list[currentRow].toUtf8().constData(),I1,I2))
             I2.clear();
-        if(!is_label)
-            tipl::segmentation::normalize_otsu_median(I2);
-        if(ui->train_view_transform->isChecked())
+        else
         {
-            std::unordered_map<std::string,float> options;
-            for(auto& each : option->treemodel->name_data_mapping)
-                options[each.first.toUtf8().constData()] = each.second->getValue().toFloat();
+            if(!is_label)
+                tipl::segmentation::normalize_otsu_median(I2);
+            tipl::normalize(I1);
+            tipl::normalize(I2);
+            simulate_modality(I1,I2,tipl::max_value(I2),ui->seed->value());
 
-            visual_perception_augmentation(options,I1,I2,is_label,shape,ui->seed->value());
+            if(ui->train_view_transform->isChecked())
+            {
+                std::unordered_map<std::string,float> options;
+                for(auto& each : option->treemodel->name_data_mapping)
+                    options[each.first.toUtf8().constData()] = each.second->getValue().toFloat();
+                visual_perception_augmentation(options,I1,I2,is_label,I2.shape(),ui->seed->value());
+            }
+
         }
-        if(ui->view_channel->value())
-            std::copy(I1.begin()+shape.size()*ui->view_channel->value(),I1.begin()+shape.size()*(ui->view_channel->value()+1),I1.begin());
-        I1.resize(shape);
         v2c1.set_range(0,tipl::max_value(I1));
         v2c2.set_range(0,is_label ? out_count : 1);
         ui->pos->setMaximum(I1.shape()[ui->view_dim->currentIndex()]-1);
