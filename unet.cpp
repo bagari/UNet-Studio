@@ -233,6 +233,39 @@ void UNet3dImpl::add_gradient_from(const UNet3dImpl& r)
     });
 }
 
+void UNet3dImpl::create_optimizer(float learning_rate)
+{
+    tipl::progress prog("initialize optimizer");
+    std::vector<torch::Tensor> decay_params,no_decay_params;
+    for(auto& p : named_parameters())
+    {
+        auto v = p.value();
+        const auto& name = p.key();
+        bool no_decay = name.find("bias") != std::string::npos || v.dim() <= 1; // norm affine weights and all bias-like parameters
+        if(no_decay)
+            no_decay_params.push_back(v);
+        else
+            decay_params.push_back(v);
+    }
+
+    double base_wd = 3e-5;
+    std::vector<torch::optim::OptimizerParamGroup> groups;
+
+    auto opt_d = std::make_unique<torch::optim::SGDOptions>(learning_rate);
+    opt_d->momentum(0.99);
+    opt_d->nesterov(true);
+    opt_d->weight_decay(base_wd);
+
+    auto opt_nd = std::make_unique<torch::optim::SGDOptions>(learning_rate);
+    opt_nd->momentum(0.99);
+    opt_nd->nesterov(true);
+    opt_nd->weight_decay(0.0);
+
+    groups.push_back(torch::optim::OptimizerParamGroup(decay_params,std::move(opt_d)));
+    groups.push_back(torch::optim::OptimizerParamGroup(no_decay_params,std::move(opt_nd)));
+    optimizer = std::make_shared<torch::optim::SGD>(groups,torch::optim::SGDOptions(learning_rate));
+}
+
 std::string UNet3dImpl::get_info(void) const
 {
     std::ostringstream out;
