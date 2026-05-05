@@ -274,6 +274,8 @@ void MainWindow::load_network(QString fileName)
         QMessageBox::critical(this,"Error","Invalid file format");
         return;
     }
+    train.model_path = fileName.toUtf8().constData();
+    train.save_model_during_training = false;
     settings.setValue("model_dir",QFileInfo(fileName).absolutePath());
     settings.setValue("model_file",train_name = QFileInfo(fileName.remove(".nz")).fileName());
     ui->model_info->setText(QString("name: %1\n").arg(train_name) + train.model->get_info().c_str());
@@ -300,18 +302,13 @@ void MainWindow::on_action_train_save_network_triggered()
     if(fileName.isEmpty())
         return;
 
-    if(train.running)
-    {
-        train.save_model_now_path = fileName.toUtf8().constData();
-        train.save_model_now = true;
-        QMessageBox::information(this,"","Model will be saved at the end of the current epoch");
-    }
-    else
     {
         std::scoped_lock<std::mutex> lock(train.output_model_mutex);
         train.output_model->to(torch::kCPU);
         save_to_file(train.output_model,fileName.toUtf8().constData());
         train.output_model->to(train.param.test_device);
+        if(train.model->optimizer)
+            torch::save(*(train.model->optimizer),(std::filesystem::path(fileName.toUtf8().constData()) += ".opt").make_preferred().string());
         QMessageBox::information(this,"","Model Saved");
     }
     settings.setValue("model_dir",QFileInfo(fileName).absolutePath());
@@ -555,8 +552,8 @@ void MainWindow::training()
     ui->train_open_network->setEnabled(!train.running);
     ui->action_train_new_network->setEnabled(!train.running);
 
-    ui->train_save_network->setEnabled(!train.running || train.pause);
-    ui->action_train_save_network->setEnabled(!train.running || train.pause);
+    ui->train_save_network->setEnabled(!train.running || (train.pause && train.cur_validation_epoch == train.cur_epoch));
+    ui->action_train_save_network->setEnabled(!train.running || (train.pause && train.cur_validation_epoch == train.cur_epoch));
     ui->train_new_network->setEnabled(!train.running);
     ui->action_train_auto_match_label_files->setEnabled(!train.running);
 
