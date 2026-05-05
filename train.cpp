@@ -865,7 +865,6 @@ void train_unet::stop(void)
     join();
 }
 
-bool get_label_info(const std::string& label_name,std::vector<int>& out_count,bool& is_label);
 
 std::string get_network_path(void)
 {
@@ -950,18 +949,22 @@ int tra(void)
     }
     else
     {
-        std::vector<int> label_count;
-        if(!get_label_info(train.param.label_file_name[0].c_str(),label_count,train.param.is_label))
-            return tipl::error() << "cannot open the label file" << train.param.label_file_name[0],1;
+        tipl::image<3,char> I;
+        tipl::vector<3> vs;
+        if(!(tipl::io::gz_nifti(train.param.label_file_name[0],std::ios::in) >> I >> vs >>
+            [&](auto& e){tipl::error() << "cannot load label file: " << e;}))
+            return 1;
 
         size_t in_count = po.get("in_count",1);
-        size_t out_count = po.get("out_count",label_count.size()+1);
+        size_t out_count = po.get("out_count",tipl::max_value(I)+1);
         std::string architecture = po.get("architecture",default_feature(out_count));
 
         try
         {
             tipl::out() << "create new network with structure " << architecture;
             train.model = UNet3d(in_count,out_count,architecture);
+            tipl::out() << "dim: " << (train.model->dim = tipl::ml3d::round_up_size(I.shape()));
+            tipl::out() << "vs: " << (train.model->vs = vs);
         }
         catch(...)
         {
