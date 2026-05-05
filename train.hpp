@@ -60,9 +60,7 @@ private:
 private:
     std::vector<tipl::image<3> > in_file,out_file;
     std::vector<size_t> in_file_read_id,in_file_seed;
-    std::vector<char> file_ready;
-private:
-
+    std::vector<char> file_ready;   
 private:
     size_t thread_count = 1;
     std::vector<tipl::image<3> > in_data,out_data;
@@ -78,11 +76,14 @@ public:
     size_t cur_epoch = 0,cur_validation_epoch = 0;
     std::mutex error_mutex;
     std::string get_status(void);
-
+public:
+    bool save_model_now = false;
+    std::string save_model_now_path;
 public:
     std::mutex output_model_mutex;
     UNet3d model,output_model;
     std::vector<UNet3d> other_models;
+    std::string model_path;
     ~train_unet(void)
     {
         stop();
