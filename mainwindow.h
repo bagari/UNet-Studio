@@ -45,6 +45,8 @@ public: //evalute
     tipl::value_to_color<float> eval_v2c1,eval_v2c2;
 private:
     int in_count = 1,out_count = 1;
+    tipl::vector<3> model_vs;
+    tipl::shape<3> model_dim;
     bool is_label = true;
     std::vector<int> label_count;
     void copy_to_clipboard(bool left,bool cropped);
