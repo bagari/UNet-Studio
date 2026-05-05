@@ -469,7 +469,7 @@ void train_unet::train(void)
                                     break;
 
                                 size_t data_idx = (cur_data_index+b)%data_ready.size();
-                                while(!data_ready[data_idx])
+                                while(!data_ready[data_idx] || pause)
                                     if(aborted) return; else std::this_thread::sleep_for(100ms);
 
 
@@ -594,7 +594,7 @@ void train_unet::train(void)
 
                 // wait for validation thread to finish last epoch
                 training_status = "waiting for validation";
-                while(cur_validation_epoch < cur_epoch || pause)
+                while(cur_validation_epoch < cur_epoch)
                     if(aborted) return; else std::this_thread::sleep_for(100ms);
 
                 {
@@ -604,15 +604,15 @@ void train_unet::train(void)
 
                 ++cur_epoch;
 
-                if((!model_path.empty() && (cur_epoch % 500 == 0)) || save_model_now)
+                if(save_model_during_training && !model_path.empty() && (cur_epoch % 500 == 0))
                 {
-                    tipl::out() << "saving model to " << (save_model_now ? save_model_now_path : model_path);
-                    // wait for validation error to come in
+                    training_status = "saving model";
+                    tipl::out() << "saving model to " << model_path;
                     while(cur_validation_epoch < cur_epoch)
-                        if(aborted) return; else std::this_thread::sleep_for(100ms);
-                    save_to_file(model,save_model_now ? save_model_now_path.c_str() : model_path.c_str());
-                    torch::save(*(model->optimizer),(save_model_now ? save_model_now_path : model_path)+".opt");
-                    save_model_now = false;
+                        if(aborted) return;else std::this_thread::sleep_for(100ms);
+
+                    save_to_file(model,model_path.c_str());
+                    torch::save(*(model->optimizer),(std::filesystem::path(model_path) += ".opt").make_preferred().string());
                 }
             }
         }
@@ -650,16 +650,16 @@ void train_unet::validate(void)
 
             auto start_time = std::chrono::steady_clock::now();
             size_t start_validation_epoch = cur_validation_epoch;
-            tipl::time t;
 
             for(;cur_validation_epoch<param.epoch&&!aborted;++cur_validation_epoch)
             {
-                while(cur_epoch<=cur_validation_epoch||!test_data_ready||pause)
+                while(cur_epoch <= cur_validation_epoch || !test_data_ready)
                     if(aborted) return; else std::this_thread::sleep_for(100ms);
 
                 std::vector<float> errors;
                 if(!test_in_tensor.empty())
                 {
+                    std::scoped_lock<std::mutex> lock(output_model_mutex);
                     torch::NoGradGuard no_grad;
                     output_model->eval();
                     for(size_t i = 0,sz = test_in_tensor.size();i<sz;++i)
@@ -678,17 +678,16 @@ void train_unet::validate(void)
                     if(cur_validation_epoch%100==0)
                     {
                         std::string out = "|-------------------------|--------------------------|-------------------------|";
-                        auto str = t.to_string();
                         double cur_lr = param.learning_rate*std::pow(1.0-(double)cur_validation_epoch/param.epoch,0.9);
-                        str += "-lr:"+std::to_string(cur_lr);
+                        auto str = "lr:"+std::to_string(cur_lr);
                         if(cur_validation_epoch>start_validation_epoch)
                         {
                             auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(
                                                std::chrono::steady_clock::now()-start_time).count();
                             auto done = cur_validation_epoch-start_validation_epoch;
                             auto fmt = [](auto s){return std::to_string(s/3600)+"h"+std::to_string((s%3600)/60)+"m";};
-                            str += " rem:" + fmt(elapsed*(param.epoch-cur_validation_epoch)/done) +
-                                   " / total:" + fmt(elapsed*param.epoch/done);
+                            str += "," + fmt(elapsed*(param.epoch-cur_validation_epoch)/done) +
+                                   "/" + fmt(elapsed*param.epoch/done);
                         }
                         size_t copy_len = std::min(str.length(),out.length()-2);
                         std::copy(str.begin(),str.begin()+copy_len,out.begin()+1);
@@ -761,35 +760,21 @@ void train_unet::start(void)
 
     if(model->errors.empty() || !model->optimizer.get())
     {
-        tipl::progress prog("initialize optimizer");
-        std::vector<torch::Tensor> decay_params,no_decay_params;
-        for(auto& p : model->named_parameters())
+        tipl::out() << "current epoch: " << model->errors.size();
+        model->create_optimizer(param.learning_rate);
+        if(std::filesystem::exists(model_path+".opt"))
         {
-            auto v = p.value();
-            const auto& name = p.key();
-            bool no_decay = name.find("bias") != std::string::npos || v.dim() <= 1; // norm affine weights and all bias-like parameters
-            if(no_decay)
-                no_decay_params.push_back(v);
-            else
-                decay_params.push_back(v);
+            tipl::out() << "loading existing optimizer " << model_path+".opt";
+            try
+            {
+                torch::load(*(model->optimizer),
+                            (std::filesystem::path(model_path) += ".opt").make_preferred().string());
+            }
+            catch(const c10::Error& e)
+            {
+                return tipl::error() << (error_msg = std::string("cannot load optimizer: ") + e.what()),aborted = true,void();
+            }
         }
-
-        double base_wd = 3e-5;
-        std::vector<torch::optim::OptimizerParamGroup> groups;
-
-        auto opt_d = std::make_unique<torch::optim::SGDOptions>(param.learning_rate);
-        opt_d->momentum(0.99);
-        opt_d->nesterov(true);
-        opt_d->weight_decay(base_wd);
-
-        auto opt_nd = std::make_unique<torch::optim::SGDOptions>(param.learning_rate);
-        opt_nd->momentum(0.99);
-        opt_nd->nesterov(true);
-        opt_nd->weight_decay(0.0);
-
-        groups.push_back(torch::optim::OptimizerParamGroup(decay_params,std::move(opt_d)));
-        groups.push_back(torch::optim::OptimizerParamGroup(no_decay_params,std::move(opt_nd)));
-        model->optimizer = std::make_shared<torch::optim::SGD>(groups,torch::optim::SGDOptions(param.learning_rate));
     }
 
     tipl::out() << "gpu count: " << torch::cuda::device_count();
@@ -963,6 +948,7 @@ int tra(void)
         }
     }
 
+    train.save_model_during_training = true;
     train.start();
 
     if(!train.error_msg.empty())
