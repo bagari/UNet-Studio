@@ -11,7 +11,7 @@ struct training_param{
     std::vector<float> subject_label_weight;
     int batch_size = 32;
     int epoch = 10000;
-    float learning_rate = 0.01f;
+    float learning_rate = 0.001f;
     bool is_label = true;
     bool cost_ce = true,cost_dice = true,cost_mse = true;
 
