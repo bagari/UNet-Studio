@@ -368,13 +368,13 @@ bool visual_perception_augmentation_cuda(std::unordered_map<std::string,float>& 
     // lighting
     if(apply("ambient"))
     {
-        float ambient_magnitude = one()*options["ambient_mag"];
+        float ambient_magnitude = range(0.0f,1.0f)*options["ambient_mag"];
         for(auto& image : input_images)
             tipl::add_constant(image,ambient_magnitude);
     }
     if(apply("diffuse"))
     {
-        auto diffuse_dir = tipl::vector<3>(one()-0.5f,one()-0.5f,one()-0.5f);
+        auto diffuse_dir = tipl::vector<3>(range(-0.5f,0.5f),range(-0.5f,0.5f),range(-0.5f,0.5f));
         for(auto& image : input_images)
             diffuse_light_cuda(image,diffuse_dir,options["diffuse_mag"]);
     }
@@ -403,15 +403,15 @@ bool visual_perception_augmentation_cuda(std::unordered_map<std::string,float>& 
         auto trans = tipl::transformation_matrix<float>(transform,image_shape,tipl::v(1.0f,1.0f,1.0f),image_shape,tipl::v(1.0f,1.0f,1.0f));
 
 
-        tipl::vector<3> perspective((one()-0.5f)*options["perspective"]/float(image_shape[0]),
-                                    (one()-0.5f)*options["perspective"]/float(image_shape[1]),
-                                    (one()-0.5f)*options["perspective"]/float(image_shape[2]));
+        tipl::vector<3> perspective(range(-0.5f,0.5f)*options["perspective"]/float(image_shape[0]),
+                                    range(-0.5f,0.5f)*options["perspective"]/float(image_shape[1]),
+                                    range(-0.5f,0.5f)*options["perspective"]/float(image_shape[2]));
         auto center = tipl::vector<3>(image_shape)/2.0f;
 
 
         tipl::device_image<3,tipl::vector<3> > displaced(image_shape);
         if(options["lens_distortion"] != 0.0f)
-            lens_distortion_cuda(displaced,one()*options["lens_distortion"]);
+            lens_distortion_cuda(displaced,range(0.0f,1.0f)*options["lens_distortion"]);
 
         if(apply("distortion"))
         {
@@ -480,7 +480,7 @@ bool visual_perception_augmentation_cuda(std::unordered_map<std::string,float>& 
                 {
                     tipl::resample(image,background,tipl::transformation_matrix<float>(args[iter],image_shape,tipl::v(1.0f,1.0f,1.0f),image_shape,tipl::v(1.0f,1.0f,1.0f)));
                     tipl::lower_threshold(background,0.0f);
-                    tipl::normalize(background,options["rubber_stamping_mag"]);
+                    tipl::normalize(background,range(0.0f,1.0f)*options["rubber_stamping_mag"]);
                     TIPL_RUN(blend_kernel,image_out.size())
                             (tipl::make_shared(image_out),tipl::make_shared(output_label),tipl::make_shared(background));
                 }
@@ -509,7 +509,7 @@ bool visual_perception_augmentation_cuda(std::unordered_map<std::string,float>& 
             TIPL_RUN(perlin_texture_kernel2,background.size())
                     (tipl::make_shared(background));
 
-            tipl::normalize(background,options["perlin_texture_mag"]);
+            tipl::normalize(background,range(0.0f,1.0f)*options["perlin_texture_mag"]);
             for(auto& image : output_images)
                 TIPL_RUN(blend_kernel,image.size())
                 (tipl::make_shared(image),tipl::make_shared(output_label),tipl::make_shared(background));
