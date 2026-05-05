@@ -65,8 +65,8 @@ void MainWindow::on_action_evaluate_copy_trained_network_triggered()
 
 void MainWindow::on_action_evaluate_open_network_triggered()
 {
-    QString fileName = QFileDialog::getOpenFileName(this,"Open Network File",settings.value("network_dir").toString() + "/" +
-                                                    settings.value("network_file").toString() + ".nz","Network files (*nz);;All files (*)");
+    QString fileName = QFileDialog::getOpenFileName(this,"Open Network File",settings.value("model_dir").toString() + "/" +
+                                                    settings.value("model_file").toString() + ".nz","Network files (*nz);;All files (*)");
     if(fileName.isEmpty())
         return;
     if(!load_from_file(evaluate.model,fileName.toUtf8().constData()))
@@ -74,8 +74,8 @@ void MainWindow::on_action_evaluate_open_network_triggered()
         QMessageBox::critical(this,"Error","Invalid file format");
         return;
     }
-    settings.setValue("network_dir",QFileInfo(fileName).absolutePath());
-    settings.setValue("network_file",eval_name = QFileInfo(fileName.remove(".nz")).fileName());
+    settings.setValue("model_dir",QFileInfo(fileName).absolutePath());
+    settings.setValue("model_file",eval_name = QFileInfo(fileName.remove(".nz")).fileName());
     ui->evaluate_network_info->setText(QString("name: %1\n").arg(eval_name) + evaluate.model->get_info().c_str());
     ui->evaluate->setEnabled(evaluate_list.size());
     ui->evaluate_builtin_networks->setCurrentIndex(0);
