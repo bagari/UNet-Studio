@@ -286,9 +286,9 @@ void MainWindow::load_network(QString fileName)
 }
 void MainWindow::on_action_train_open_network_triggered()
 {
-    QString fileName = QFileDialog::getOpenFileName(this,"Open network file",
+    QString fileName = QFileDialog::getOpenFileName(this,"Open model file",
                                                 settings.value("model_dir").toString() + "/" +
-                                                settings.value("model_file").toString() + ".nz","Network files (*nz);;All files (*)");
+                                                settings.value("model_file").toString() + ".nz","Model files (*nz);;All files (*)");
     if(fileName.isEmpty())
         return;
     load_network(fileName);
@@ -296,9 +296,9 @@ void MainWindow::on_action_train_open_network_triggered()
 }
 void MainWindow::on_action_train_save_network_triggered()
 {
-    QString fileName = QFileDialog::getSaveFileName(this,"Save network file",
+    QString fileName = QFileDialog::getSaveFileName(this,"Save model file",
                                                 settings.value("model_dir").toString() + "/" +
-                                                train_name + ".nz","Network files (*nz);;All files (*)");
+                                                train_name + ".nz","Model Files (*nz);;All files (*)");
     if(fileName.isEmpty())
         return;
 
