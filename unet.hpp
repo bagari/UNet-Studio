@@ -16,6 +16,8 @@ public:
     int out_count = 1;
     std::string architecture,preproc,postproc,report,fov_strategy,error_msg;
 public:
+    std::shared_ptr<torch::optim::SGD> optimizer;
+
     std::vector<float> errors;
     mutable std::mutex error_mutex;
     auto get_errors(void) const
@@ -56,7 +58,6 @@ public:
     {
         return parameters().size() && parameters()[0].defined() ? parameters()[0].device() : torch::kCPU;
     }
-    bool init_dimension(const std::string& template_file);
 };
 TORCH_MODULE_IMPL(UNet3d, UNet3dImpl);
 
