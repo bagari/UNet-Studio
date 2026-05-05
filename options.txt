@@ -34,6 +34,6 @@ Camera Transform/├Minimum Magnitude/distortion_mag_min/float:0.0:0.5:0.05:2/0.
 Camera Transform/└Maximum Magnitude/distortion_mag_max/float:0.0:0.5:0.05:2/0.1/maximum distortion magnitude
 Background/Zero Background/zero_background/Off:25%:50%:75%:On/1/Set background to zero
 Background/Rubber-Stamping/rubber_stamping/Off:25%:50%:75%:On/2/Add background
-Background/└Magnitude/rubber_stamping_mag/float:0.0:1.0:0.1:2/1.0/The magnitude of background images
+Background/└Magnitude/rubber_stamping_mag/float:0.0:1.0:0.1:2/0.5/The magnitude of background images
 Background/Perlin Texture/perlin_texture/Off:25%:50%:75%:On/2/Add Perlin noise
-Background/└Magnitude/perlin_texture_mag/float:0.0:1.0:0.1:2/1.0/The magnitude of background images
+Background/└Magnitude/perlin_texture_mag/float:0.0:1.0:0.1:2/0.5/The magnitude of background images
