@@ -76,14 +76,13 @@ public:
     size_t cur_epoch = 0,cur_validation_epoch = 0;
     std::mutex error_mutex;
     std::string get_status(void);
-public:
-    bool save_model_now = false;
-    std::string save_model_now_path;
+
 public:
     std::mutex output_model_mutex;
     UNet3d model,output_model;
     std::vector<UNet3d> other_models;
     std::string model_path;
+    bool save_model_during_training = true;
     ~train_unet(void)
     {
         stop();
