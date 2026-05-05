@@ -514,13 +514,13 @@ int eval(void)
     if((eval.param.image_file_name = po.get_files("source")).empty())
         return tipl::error() << "no file specified at --source",1;
 
-    auto network = get_model_path();
+    auto model_path = get_model_path();
     {
-        if(!std::filesystem::exists(network))
-            return tipl::error() << "cannot find the network file " << network,1;
-        tipl::out() << "loading network " << network;
-        if(!load_from_file(eval.model,network.c_str()))
-            return tipl::error() << "failed to load model from " << network,1;
+        if(!std::filesystem::exists(model_path))
+            return tipl::error() << "cannot find the network file " << model_path,1;
+        tipl::out() << "loading network " << model_path;
+        if(!load_from_file(eval.model,model_path.c_str()))
+            return tipl::error() << "failed to load model from " << model_path,1;
         tipl::out() << eval.model->get_info();
     }
 
