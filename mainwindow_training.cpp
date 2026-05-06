@@ -147,7 +147,7 @@ void MainWindow::on_action_train_open_files_triggered()
 
     std::vector<std::string> file_list;
     for(auto& s : fileNames)
-        file_list.push_back(s.toStdString());
+        file_list.push_back(s.toUtf8().constData());
 
     for(auto& p : pair_image_files(file_list))
     {
