@@ -914,7 +914,7 @@ int tra(void)
 
         if(!(tipl::io::gz_nifti(train.param.label_file_name[0],std::ios::in) >> I >>
             [&](auto& e){tipl::error() << "cannot load label file: " << e;}) ||
-            !(tipl::io::gz_nifti(train.param.image_file_name[0],std::ios::in) >> dim >> vs
+            !(tipl::io::gz_nifti(train.param.image_file_name[0],std::ios::in) >> dim >> vs >>
             [&](auto& e){tipl::error() << "cannot load image file: " << e;}))
             return 1;
 
