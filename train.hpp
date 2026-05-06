@@ -6,7 +6,7 @@
 #include "unet.hpp"
 
 struct training_param{
-    std::vector<std::string> image_file_name,test_image_file_name;
+    std::vector<std::pair<std::string,std::string>> image_file_name,test_image_file_name;
     std::vector<std::string> label_file_name,test_label_file_name;
     std::vector<float> subject_label_weight;
     int batch_size = 32;
@@ -30,7 +30,7 @@ struct training_param{
 
 bool save_to_file(UNet3d& model,const char* file_name);
 bool load_from_file(UNet3d& model,const char* file_name);
-bool read_image_and_label(const std::string& image_name,const std::string& label_name,tipl::image<3>& input,tipl::image<3>& label);
+bool read_image_and_label(const std::pair<std::string,std::string>& image_name,const std::string& label_name,tipl::image<3>& input,tipl::image<3>& label);
 void simulate_modality(tipl::image<3>& t1w, // store t1w or [t1w t2w]
                        const tipl::image<3>& label,
                        unsigned int max_label,
@@ -53,7 +53,6 @@ public:
     std::string error_msg,reading_status,augmentation_status,training_status,validation_status;
 private:
     std::vector<tipl::image<3> > train_image,train_label;
-    std::vector<char> train_image_is_template;
     std::vector<torch::Tensor> test_in_tensor,test_out_tensor;
     bool test_data_ready = false;
     std::shared_ptr<std::thread> read_images;
