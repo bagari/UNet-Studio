@@ -29,6 +29,7 @@ void MainWindow::on_action_open_training_setting_triggered()
         return;
     QSettings ini(fileName,QSettings::IniFormat);
     image_list = ini.value("image",image_list).toStringList();
+    image2_list = ini.value("image2",image_list).toStringList();
     label_list = ini.value("label",label_list).toStringList();
 
     in_count = ini.value("in_count",in_count).toInt();
@@ -66,6 +67,7 @@ void MainWindow::on_action_save_training_setting_triggered()
 
     QSettings ini(fileName,QSettings::IniFormat);
     ini.setValue("image",image_list);
+    ini.setValue("image2",image2_list);
     ini.setValue("label",label_list);
     ini.setValue("in_count",in_count);
     ini.setValue("out_count",out_count);
@@ -94,7 +96,10 @@ void MainWindow::update_list(void)
     bool ready_to_train = false;
     for(size_t i = 0;i < image_list.size();++i)
     {
-        ui->list1->addItem(QFileInfo(image_list[i]).fileName());
+        if(image2_list[i].isEmpty())
+            ui->list1->addItem(QFileInfo(image_list[i]).fileName());
+        else
+            ui->list1->addItem(QFileInfo(image_list[i]).fileName() + "/" + QFileInfo(image2_list[i]).fileName());
         auto item = ui->list1->item(i);
         item->setFlags(item->flags() | Qt::ItemIsUserCheckable);
         item->setCheckState(Qt::Checked);
@@ -121,7 +126,7 @@ void MainWindow::update_list(void)
 
 
 }
-
+std::vector<std::pair<std::string,std::string> > pair_image_files(const std::vector<std::string>& file_list);
 void MainWindow::on_action_train_open_files_triggered()
 {
     QStringList fileNames = QFileDialog::getOpenFileNames(
@@ -139,12 +144,19 @@ void MainWindow::on_action_train_open_files_triggered()
 
     settings.setValue("work_dir",QFileInfo(fileNames[0]).absolutePath());
     image_last_added_indices.clear();
-    for(auto s : fileNames)
+
+    std::vector<std::string> file_list;
+    for(auto& s : fileNames)
+        file_list.push_back(s.toStdString());
+
+    for(auto& p : pair_image_files(file_list))
     {
         image_last_added_indices.push_back(image_list.size());
-        image_list << s;
+        image_list << QString::fromStdString(p.first);
+        image2_list << QString::fromStdString(p.second);
         label_list << QString();
     }
+
     update_list();
 
 }
@@ -233,6 +245,7 @@ void MainWindow::on_action_train_open_labels_triggered()
 void MainWindow::on_action_train_clear_all_triggered()
 {
     image_list.clear();
+    image2_list.clear();
     label_list.clear();
     in_count = out_count = 1;
     is_label = true;
@@ -385,6 +398,7 @@ void MainWindow::on_train_start_clicked()
     train.param.test_label_file_name.clear();
 
 
+    image2_list.resize(image_list.size());
     for(size_t i = 0;i < image_list.size();++i)
     {
         if(!std::filesystem::exists(image_list[i].toUtf8().constData()) ||
@@ -392,7 +406,7 @@ void MainWindow::on_train_start_clicked()
             continue;
         if(ui->list1->item(i)->checkState() == Qt::Checked)
         {
-            train.param.image_file_name.push_back(image_list[i].toUtf8().constData());
+            train.param.image_file_name.push_back({image_list[i].toUtf8().constData(),image2_list[i].toUtf8().constData()});
             train.param.label_file_name.push_back(label_list[i].toUtf8().constData());
         }
     }
@@ -595,7 +609,7 @@ void MainWindow::on_list1_currentRowChanged(int currentRow)
     if(currentRow >= 0 && currentRow < image_list.size())
     {
         if(!std::filesystem::exists(image_list[currentRow].toUtf8().constData()) ||
-           !read_image_and_label(image_list[currentRow].toUtf8().constData(),label_list[currentRow].toUtf8().constData(),I1,I2))
+            !read_image_and_label({image_list[currentRow].toUtf8().constData(),image2_list[currentRow].toUtf8().constData()},label_list[currentRow].toUtf8().constData(),I1,I2))
             I2.clear();
         else
         {
