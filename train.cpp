@@ -907,10 +907,15 @@ int tra(void)
     }
     else
     {
+        tipl::progress prog("setting up model");
         tipl::image<3,char> I;
+        tipl::shape<3> dim;
         tipl::vector<3> vs;
-        if(!(tipl::io::gz_nifti(train.param.label_file_name[0],std::ios::in) >> I >> vs >>
-            [&](auto& e){tipl::error() << "cannot load label file: " << e;}))
+
+        if(!(tipl::io::gz_nifti(train.param.label_file_name[0],std::ios::in) >> I >>
+            [&](auto& e){tipl::error() << "cannot load label file: " << e;}) ||
+            !(tipl::io::gz_nifti(train.param.image_file_name[0],std::ios::in) >> dim >> vs
+            [&](auto& e){tipl::error() << "cannot load image file: " << e;}))
             return 1;
 
         size_t in_count = po.get("in_count",1);
@@ -920,7 +925,7 @@ int tra(void)
         try
         {
             train.model = UNet3d(in_count,out_count,architecture);
-            tipl::out() << "dim: " << (train.model->dim = tipl::ml3d::round_up_size(I.shape()));
+            tipl::out() << "dim: " << (train.model->dim = tipl::ml3d::round_up_size(dim));
             tipl::out() << "vs: " << (train.model->voxel_size = vs);
         }
         catch(...)
