@@ -33,7 +33,7 @@ public:
     QStringList evaluate_list;
     void update_evaluate_list(void);
 public:
-    QStringList image_list,label_list;
+    QStringList image_list,image2_list,label_list;
     std::vector<size_t> image_last_added_indices;
 
 
