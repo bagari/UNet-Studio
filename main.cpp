@@ -180,14 +180,8 @@ bool load_from_file(UNet3d& model,const char* file_name)
     tipl::out() << "voxel_size:" << model->voxel_size;
     tipl::out() << "dimension:" << model->dim;
 
-    {
-        unsigned int r,c;
-        if(mat.get_col_row("errors",r,c))
-        {
-            model->errors.resize(r*c);
-            mat.read("errors",model->errors);
-        }
-    }
+    model->errors = mat.read_as_vector<float>("errors");
+    model->prior_errors = mat.read_as_vector<float>("prior_errors");
 
     model->train();
     model->print_layers();
@@ -219,6 +213,7 @@ bool save_to_file(UNet3d& model,const char* file_name)
     mat.write("preproc",model->preproc);
     mat.write("postproc",model->postproc);
     mat.write("errors",model->errors,3);
+    mat.write("prior_errors",model->prior_errors,3);
     int id = 0;
     mat.apply_slope = true;
     mat.min_size_for_mask_slope = 1024;
