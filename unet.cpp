@@ -92,7 +92,7 @@ UNet3dImpl::UNet3dImpl(int32_t in_count_,
 {
     fov_strategy = "align_top";
     preproc = "";
-    postproc = "softmax+remove_bg_channel+create_mask+argmax";
+    postproc = "softmax+create_mask+argmax";
     std::vector<std::vector<std::string>> enc_tokens, dec_tokens;
     {
         std::vector<std::string> all_lines(tipl::split_in_lines(architecture_));
@@ -148,9 +148,38 @@ UNet3dImpl::UNet3dImpl(int32_t in_count_,
     }
 
     std::stringstream ss;
-    ss << "The implemented model is a 3D U-Net designed to map "
-       << in_count << " input channel" << (in_count>1?"s":"") << " to "
-       << out_count << " output classes using " << enc_tokens.size() << " resolution levels. ";
+
+    ss << "This model is a 3D U-Net that maps "
+       << in_count << " input channel" << (in_count > 1 ? "s" : "")
+       << " to " << out_count << " output class" << (out_count > 1 ? "es" : "")
+       << ". ";
+
+    ss << "The network uses " << enc_tokens.size()
+       << " resolution levels. The encoder progressively extracts features from "
+       << in_count << " channels to " << skip_channels.back()
+       << " channels, while the decoder restores spatial resolution using skip connections. ";
+
+    size_t output_head_count = 0;
+    for(const auto& each : output)
+        if(!each->is_empty())
+            ++output_head_count;
+
+    if(output_head_count > 1)
+        ss << "The model uses deep supervision with " << output_head_count
+           << " output heads placed along the decoder path. ";
+    else
+        if(output_head_count == 1)
+            ss << "The model uses one final output head at the full image resolution. ";
+        else
+            ss << "No output head was detected. ";
+
+    ss << "The default field-of-view strategy is " << fov_strategy
+       << ". The default preprocessing is "
+       << (preproc.empty() ? "none" : preproc)
+       << ", and the default postprocessing is " << postproc << ". ";
+
+    ss << "The architecture string is: " << architecture;
+
     report = ss.str();
 }
 
