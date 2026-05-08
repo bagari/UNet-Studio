@@ -18,7 +18,7 @@ public:
 public:
     std::shared_ptr<torch::optim::SGD> optimizer;
 
-    std::vector<float> errors;
+    std::vector<float> errors,prior_errors;
     mutable std::mutex error_mutex;
     auto get_errors(void) const
     {
