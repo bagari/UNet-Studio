@@ -12,6 +12,7 @@ struct training_param{
     int batch_size = 32;
     int epoch = 10000;
     float learning_rate = 0.001f;
+    size_t seed = 0;
     bool is_label = true;
     bool cost_ce = true,cost_dice = true,cost_mse = true;
 
