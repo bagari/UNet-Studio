@@ -292,7 +292,7 @@ void train_unet::read_file(void)
 
         std::uniform_int_distribution<int> template_gen(0,std::max<int>(1,template_indices.size())-1);
         std::uniform_int_distribution<int> non_template_gen(0,std::max<int>(1,non_template_indices.size())-1);
-        std::mt19937 gen(0);
+        std::mt19937 gen(param.seed);
 
         for(size_t seed_id = 0;!aborted;++seed_id)
         {
@@ -986,6 +986,7 @@ int tra(void)
     train.param.batch_size =        po.get("batch_size",train.param.batch_size);
     train.param.learning_rate =     po.get("learning_rate",train.param.learning_rate);
     train.param.epoch =             po.get("epoch",train.param.epoch);
+    train.param.seed =              po.get("seed",po.get("restart",0));
     train.param.is_label =          po.get("is_label",train.param.is_label?1:0);
     train.param.cost_ce =           po.get("cost_ce",train.param.cost_ce ? 1:0);
     train.param.cost_dice =         po.get("cost_dice",train.param.cost_dice ? 1:0);
@@ -1021,7 +1022,12 @@ int tra(void)
 
         tipl::out() << train.model->get_info();
 
-
+        if(po.get("restart",0))
+        {
+            tipl::out() << "restart training model";
+            train.model->prior_errors.insert(train.model->prior_errors.end(),train.model->errors.begin(),train.model->errors.end());
+            train.model->errors.clear();
+        }
     }
     else
     {
