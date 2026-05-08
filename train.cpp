@@ -597,13 +597,12 @@ void train_unet::train(void)
 
                 ++cur_epoch;
 
-                if(save_model_during_training && !model_path.empty() && (cur_epoch % 500 == 0))
+                if(save_model_during_training && !model_path.empty() && (cur_epoch % 100 == 0))
                 {
                     training_status = "saving model";
-                    tipl::out() << "saving model to " << model_path;
                     while(cur_validation_epoch < cur_epoch)
                         if(aborted) return;else std::this_thread::sleep_for(100ms);
-
+                    tipl::out() << "saving model to " << model_path;
                     save_to_file(model,model_path.c_str());
                     torch::save(*(model->optimizer),(std::filesystem::path(model_path) += ".opt").make_preferred().string());
                 }
