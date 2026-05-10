@@ -1,7 +1,6 @@
 #include "mainwindow.h"
 #include "ui_mainwindow.h"
 #include "optiontablewidget.hpp"
-#include <QFileDialog>
 #include <QInputDialog>
 #include <QSettings>
 #include <QMessageBox>
@@ -35,10 +34,10 @@ void MainWindow::update_evaluate_list(void)
 }
 void MainWindow::on_action_evaluate_open_images_triggered()
 {
-    QStringList file = QFileDialog::getOpenFileNames(this,"Open Image",settings.value("work_dir").toString(),"NIFTI files (*nii.gz);;All files (*)");
+    QStringList file = tipl::qt::open_image_files(this,ui->workDir->currentText(),"NIFTI files (*nii.gz);;All files (*)");
     if(file.isEmpty())
         return;
-    settings.setValue("work_dir",QFileInfo(file[0]).absolutePath());
+    add_work_dir(QFileInfo(file.front()).absolutePath());
     evaluate_list << file;
     update_evaluate_list();
     ui->evaluate->setEnabled(!evaluate.model->architecture.empty());
@@ -65,8 +64,7 @@ void MainWindow::on_action_evaluate_copy_trained_network_triggered()
 
 void MainWindow::on_action_evaluate_open_network_triggered()
 {
-    QString fileName = QFileDialog::getOpenFileName(this,"Open Network File",settings.value("model_dir").toString() + "/" +
-                                                    settings.value("model_file").toString() + ".nz","Network files (*nz);;All files (*)");
+    QString fileName = tipl::qt::open_image_file(this,ui->workDir->currentText(),"Network files (*nz);;All files (*)");
     if(fileName.isEmpty())
         return;
     if(!load_from_file(evaluate.model,fileName.toUtf8().constData()))
@@ -74,8 +72,7 @@ void MainWindow::on_action_evaluate_open_network_triggered()
         QMessageBox::critical(this,"Error","Invalid file format");
         return;
     }
-    settings.setValue("model_dir",QFileInfo(fileName).absolutePath());
-    settings.setValue("model_file",eval_name = QFileInfo(fileName.remove(".nz")).fileName());
+    add_work_dir(QFileInfo(fileName).absolutePath());
     ui->evaluate_network_info->setText(QString("name: %1\n").arg(eval_name) + evaluate.model->get_info().c_str());
     ui->evaluate->setEnabled(evaluate_list.size());
     ui->evaluate_builtin_networks->setCurrentIndex(0);
@@ -331,7 +328,7 @@ void MainWindow::on_action_evaluate_save_results_triggered()
         return;
     QString file = evaluate_list[ui->evaluate_list->currentRow()];
     file = file.remove(".nii").remove(".gz") + ".result.nii.gz";
-    file = QFileDialog::getSaveFileName(this,"Save Image",file,"NIFTI files (*nii.gz);;All files (*)");
+    file = tipl::qt::save_image_file(this,file,"NIFTI files (*nii.gz);;All files (*)");
     if(file.isEmpty())
         return;
 

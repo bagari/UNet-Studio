@@ -22,14 +22,13 @@ void MainWindow::on_action_train_options_triggered()
 void MainWindow::on_action_open_training_setting_triggered()
 {
     QString fileName = QFileDialog::getOpenFileName(
-        this,"Open Training Setting",settings.value("work_dir").toString() + "/" +
-                                     settings.value("work_file").toString() + ".ini","INI files (*.ini);;All files (*)"
+        this,"Open Training Setting",ui->workDir->currentText(),"INI files (*.ini);;All files (*)"
     );
     if (fileName.isEmpty())
         return;
+    add_work_dir(QFileInfo(fileName).absolutePath());
     QSettings ini(fileName,QSettings::IniFormat);
     image_list = ini.value("image",image_list).toStringList();
-    image2_list = ini.value("image2",image_list).toStringList();
     label_list = ini.value("label",label_list).toStringList();
 
     in_count = ini.value("in_count",in_count).toInt();
@@ -48,8 +47,6 @@ void MainWindow::on_action_open_training_setting_triggered()
 
     option->load(ini);
 
-    settings.setValue("work_dir",QFileInfo(fileName).absolutePath());
-    settings.setValue("work_file",QFileInfo(fileName.remove(".ini")).fileName());
 
     ui->tabWidget->setCurrentIndex(1);
     update_list();
@@ -59,32 +56,21 @@ void MainWindow::on_action_open_training_setting_triggered()
 void MainWindow::on_action_save_training_setting_triggered()
 {
     QString fileName = QFileDialog::getSaveFileName(
-        this,"Save Training Setting",settings.value("work_dir").toString() + "/" +
-                                     settings.value("work_file").toString() + ".ini","INI files (*.ini);;All files (*)"
+        this,"Save Training Setting",ui->workDir->currentText(),"INI files (*.ini);;All files (*)"
     );
     if (fileName.isEmpty())
         return;
-
+    add_work_dir(QFileInfo(fileName).absolutePath());
     QSettings ini(fileName,QSettings::IniFormat);
     ini.setValue("image",image_list);
-    ini.setValue("image2",image2_list);
     ini.setValue("label",label_list);
     ini.setValue("in_count",in_count);
     ini.setValue("out_count",out_count);
     ini.setValue("epoch",ui->epoch->value());
     ini.setValue("batch_size",ui->batch_size->value());
     ini.setValue("learning_rate",ui->learning_rate->value());
-    if(!train.model->errors.empty())
-    {
-        ini.setValue("model_dir",settings.value("model_dir").toString());
-        ini.setValue("model_file",settings.value("model_file").toString());
-    }
     option->save(ini);
     ini.sync();
-
-    settings.setValue("work_dir",QFileInfo(fileName).absolutePath());
-    settings.setValue("work_file",QFileInfo(fileName.remove(".ini")).fileName());
-
 }
 
 
@@ -96,10 +82,7 @@ void MainWindow::update_list(void)
     bool ready_to_train = false;
     for(size_t i = 0;i < image_list.size();++i)
     {
-        if(image2_list[i].isEmpty())
-            ui->list1->addItem(QFileInfo(image_list[i]).fileName());
-        else
-            ui->list1->addItem(QFileInfo(image_list[i]).fileName() + "/" + QFileInfo(image2_list[i]).fileName());
+        ui->list1->addItem(QFileInfo(image_list[i]).fileName());
         auto item = ui->list1->item(i);
         item->setFlags(item->flags() | Qt::ItemIsUserCheckable);
         item->setCheckState(Qt::Checked);
@@ -126,11 +109,10 @@ void MainWindow::update_list(void)
 
 
 }
-std::vector<std::pair<std::string,std::string> > pair_image_files(const std::vector<std::string>& file_list);
 void MainWindow::on_action_train_open_files_triggered()
 {
-    QStringList fileNames = QFileDialog::getOpenFileNames(
-        this,"Select NIFTI images",settings.value("work_dir").toString(),"NIFTI files (*nii.gz);;All files (*)"
+    QStringList fileNames = tipl::qt::open_image_files(
+        this,ui->workDir->currentText(),"NIFTI files (*nii.gz);;All files (*)"
     );
     if (fileNames.isEmpty())
         return;
@@ -138,22 +120,15 @@ void MainWindow::on_action_train_open_files_triggered()
     if(!(tipl::io::gz_nifti(fileNames[0].toUtf8().constData(),std::ios::in) >> model_vs >> model_dim >>
         [&](auto& e){QMessageBox::critical(this,"ERROR",e.c_str());}))
         return;
-
+    add_work_dir(QFileInfo(fileNames.front()).absolutePath());
     in_count = 1;
     model_dim = tipl::ml3d::round_up_size(model_dim);
-
-    settings.setValue("work_dir",QFileInfo(fileNames[0]).absolutePath());
     image_last_added_indices.clear();
 
-    std::vector<std::string> file_list;
     for(auto& s : fileNames)
-        file_list.push_back(s.toUtf8().constData());
-
-    for(auto& p : pair_image_files(file_list))
     {
         image_last_added_indices.push_back(image_list.size());
-        image_list << QString::fromStdString(p.first);
-        image2_list << QString::fromStdString(p.second);
+        image_list << s;
         label_list << QString();
     }
 
@@ -202,18 +177,16 @@ bool get_label_info(const std::string& label_name,std::vector<int>& out_count,bo
 
 void MainWindow::on_action_train_open_labels_triggered()
 {
-    QStringList fileNames = QFileDialog::getOpenFileNames(
-        this,"Select NIFTI images",settings.value("work_dir").toString(),"NIFTI files (*nii.gz);;All files (*)"
-    );
+    QStringList fileNames = tipl::qt::open_image_files(this,ui->workDir->currentText(),"NIFTI files (*nii.gz);;All files (*)");
     if (fileNames.isEmpty())
         return;
-    settings.setValue("work_dir",QFileInfo(fileNames[0]).absolutePath());
 
     if(!get_label_info(fileNames[0].toUtf8().constData(),label_count,is_label))
     {
         QMessageBox::critical(this,"Error",QString("%1 is not a valid label image").arg(QFileInfo(fileNames[0]).fileName()));
         return;
     }
+    add_work_dir(QFileInfo(fileNames.front()).absolutePath());
     out_count = std::max<int>(out_count,label_count.size());
 
     // auto complete
@@ -245,7 +218,6 @@ void MainWindow::on_action_train_open_labels_triggered()
 void MainWindow::on_action_train_clear_all_triggered()
 {
     image_list.clear();
-    image2_list.clear();
     label_list.clear();
     in_count = out_count = 1;
     is_label = true;
@@ -289,8 +261,6 @@ void MainWindow::load_network(QString fileName)
     }
     train.model_path = fileName.toUtf8().constData();
     train.save_model_during_training = false;
-    settings.setValue("model_dir",QFileInfo(fileName).absolutePath());
-    settings.setValue("model_file",train_name = QFileInfo(fileName.remove(".nz")).fileName());
     ui->model_info->setText(QString("name: %1\n").arg(train_name) + train.model->get_info().c_str());
     ui->model_report->setPlainText(train.model->report.c_str());
     has_network();
@@ -299,9 +269,7 @@ void MainWindow::load_network(QString fileName)
 }
 void MainWindow::on_action_train_open_network_triggered()
 {
-    QString fileName = QFileDialog::getOpenFileName(this,"Open model file",
-                                                settings.value("model_dir").toString() + "/" +
-                                                settings.value("model_file").toString() + ".nz","Model files (*nz);;All files (*)");
+    QString fileName = tipl::qt::open_image_file(this,ui->workDir->currentText(),"Model files (*nz);;All files (*)");
     if(fileName.isEmpty())
         return;
     load_network(fileName);
@@ -309,23 +277,19 @@ void MainWindow::on_action_train_open_network_triggered()
 }
 void MainWindow::on_action_train_save_network_triggered()
 {
-    QString fileName = QFileDialog::getSaveFileName(this,"Save model file",
-                                                settings.value("model_dir").toString() + "/" +
-                                                train_name + ".nz","Model Files (*nz);;All files (*)");
+    QString fileName = tipl::qt::save_image_file(this,ui->workDir->currentText(),"Model Files (*nz);;All files (*)");
     if(fileName.isEmpty())
         return;
 
-    {
-        std::scoped_lock<std::mutex> lock(train.output_model_mutex);
-        train.output_model->to(torch::kCPU);
-        save_to_file(train.output_model,fileName.toUtf8().constData());
-        train.output_model->to(train.param.test_device);
-        if(train.model->optimizer)
-            torch::save(*(train.model->optimizer),(std::filesystem::path(fileName.toUtf8().constData()) += ".opt").make_preferred().string());
-        QMessageBox::information(this,"","Model Saved");
-    }
-    settings.setValue("model_dir",QFileInfo(fileName).absolutePath());
-    settings.setValue("model_file",train_name = QFileInfo(fileName.remove(".nz")).fileName());
+    std::scoped_lock<std::mutex> lock(train.output_model_mutex);
+    train.output_model->to(torch::kCPU);
+    save_to_file(train.output_model,fileName.toUtf8().constData());
+    train.output_model->to(train.param.test_device);
+    if(train.model->optimizer)
+        torch::save(*(train.model->optimizer),(std::filesystem::path(fileName.toUtf8().constData()) += ".opt").make_preferred().string());
+    QMessageBox::information(this,"","Model Saved");
+    add_work_dir(QFileInfo(fileName).absolutePath());
+
 }
 
 
@@ -398,7 +362,6 @@ void MainWindow::on_train_start_clicked()
     train.param.test_label_file_name.clear();
 
 
-    image2_list.resize(image_list.size());
     for(size_t i = 0;i < image_list.size();++i)
     {
         if(!std::filesystem::exists(image_list[i].toUtf8().constData()) ||
@@ -406,7 +369,7 @@ void MainWindow::on_train_start_clicked()
             continue;
         if(ui->list1->item(i)->checkState() == Qt::Checked)
         {
-            train.param.image_file_name.push_back({image_list[i].toUtf8().constData(),image2_list[i].toUtf8().constData()});
+            train.param.image_file_name.push_back(image_list[i].toUtf8().constData());
             train.param.label_file_name.push_back(label_list[i].toUtf8().constData());
         }
     }
@@ -609,7 +572,7 @@ void MainWindow::on_list1_currentRowChanged(int currentRow)
     if(currentRow >= 0 && currentRow < image_list.size())
     {
         if(!std::filesystem::exists(image_list[currentRow].toUtf8().constData()) ||
-            !read_image_and_label({image_list[currentRow].toUtf8().constData(),image2_list[currentRow].toUtf8().constData()},label_list[currentRow].toUtf8().constData(),I1,I2))
+            !read_image_and_label(image_list[currentRow].toUtf8().constData(),label_list[currentRow].toUtf8().constData(),I1,I2))
             I2.clear();
         else
         {
@@ -878,6 +841,7 @@ void MainWindow::on_action_train_open_options_triggered()
     QSettings s(file,QSettings::IniFormat);
     option->load(s);
     QMessageBox::information(this,"","Setting Loaded");
+    add_work_dir(QFileInfo(file).absolutePath());
 }
 
 
@@ -891,4 +855,5 @@ void MainWindow::on_action_train_save_options_triggered()
         option->save(s);
     }
     QMessageBox::information(this,"","Setting Saved");
+    add_work_dir(QFileInfo(file).absolutePath());
 }

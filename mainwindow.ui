@@ -20,6 +20,98 @@
   <widget class="QWidget" name="centralwidget">
    <layout class="QVBoxLayout" name="verticalLayout">
     <item>
+     <layout class="QHBoxLayout" name="horizontalLayout_20" stretch="0,0,1,0,0">
+      <property name="spacing">
+       <number>0</number>
+      </property>
+      <property name="leftMargin">
+       <number>0</number>
+      </property>
+      <property name="rightMargin">
+       <number>0</number>
+      </property>
+      <item>
+       <layout class="QHBoxLayout" name="horizontalLayout_21">
+        <property name="topMargin">
+         <number>0</number>
+        </property>
+       </layout>
+      </item>
+      <item>
+       <widget class="QLabel" name="label">
+        <property name="sizePolicy">
+         <sizepolicy hsizetype="Fixed" vsizetype="Fixed">
+          <horstretch>0</horstretch>
+          <verstretch>0</verstretch>
+         </sizepolicy>
+        </property>
+        <property name="text">
+         <string>Working Directory</string>
+        </property>
+       </widget>
+      </item>
+      <item>
+       <widget class="QComboBox" name="workDir">
+        <property name="sizePolicy">
+         <sizepolicy hsizetype="Ignored" vsizetype="Fixed">
+          <horstretch>0</horstretch>
+          <verstretch>0</verstretch>
+         </sizepolicy>
+        </property>
+        <property name="maximumSize">
+         <size>
+          <width>16777215</width>
+          <height>16777215</height>
+         </size>
+        </property>
+        <property name="editable">
+         <bool>false</bool>
+        </property>
+        <property name="currentIndex">
+         <number>-1</number>
+        </property>
+        <property name="sizeAdjustPolicy">
+         <enum>QComboBox::AdjustToMinimumContentsLengthWithIcon</enum>
+        </property>
+       </widget>
+      </item>
+      <item>
+       <widget class="QPushButton" name="browseDir">
+        <property name="sizePolicy">
+         <sizepolicy hsizetype="Fixed" vsizetype="Fixed">
+          <horstretch>0</horstretch>
+          <verstretch>0</verstretch>
+         </sizepolicy>
+        </property>
+        <property name="maximumSize">
+         <size>
+          <width>100</width>
+          <height>16777215</height>
+         </size>
+        </property>
+        <property name="text">
+         <string/>
+        </property>
+        <property name="icon">
+         <iconset resource="icons.qrc">
+          <normaloff>:/icons/icons/open.png</normaloff>:/icons/icons/open.png</iconset>
+        </property>
+       </widget>
+      </item>
+      <item>
+       <widget class="QPushButton" name="console">
+        <property name="text">
+         <string>Console...</string>
+        </property>
+        <property name="icon">
+         <iconset resource="../DSI-Studio/icons.qrc">
+          <normaloff>:/icons/icons/console.xpm</normaloff>:/icons/icons/console.xpm</iconset>
+        </property>
+       </widget>
+      </item>
+     </layout>
+    </item>
+    <item>
      <widget class="QTabWidget" name="tabWidget">
       <property name="currentIndex">
        <number>1</number>
@@ -225,7 +317,7 @@
                 <string/>
                </property>
                <property name="pixmap">
-                <pixmap>:/icons/icons/ajax-loader.gif</pixmap>
+                <pixmap resource="../DSI-Studio/icons.qrc">:/icons/icons/ajax-loader.gif</pixmap>
                </property>
               </widget>
              </item>
@@ -1405,7 +1497,6 @@
      <addaction name="action_train_copy_view_right"/>
      <addaction name="action_train_copy_all_view"/>
     </widget>
-    <addaction name="actionConsole"/>
     <addaction name="menuCopy_to_Clipboard"/>
     <addaction name="menuCopy_Train_View"/>
    </widget>
@@ -1470,11 +1561,6 @@
    </property>
    <property name="text">
     <string>Save Training Setting...</string>
-   </property>
-  </action>
-  <action name="actionConsole">
-   <property name="text">
-    <string>Console</string>
    </property>
   </action>
   <action name="action_evaluate_open_images">
@@ -1717,6 +1803,7 @@
  </tabstops>
  <resources>
   <include location="icons.qrc"/>
+  <include location="../DSI-Studio/icons.qrc"/>
  </resources>
  <connections>
   <connection>

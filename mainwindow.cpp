@@ -1,10 +1,10 @@
 #include "mainwindow.h"
 #include "./ui_mainwindow.h"
 #include "optiontablewidget.hpp"
-#include <QFileDialog>
 #include <QSettings>
 #include <QMovie>
 #include <QMessageBox>
+#include <QStandardPaths>
 #include "console.h"
 #include "TIPL/tipl.hpp"
 #include <QSettings>
@@ -81,6 +81,22 @@ MainWindow::MainWindow(QWidget *parent)
         ui->template_list->setCurrentIndex(0);
     }
 
+
+    auto workdir_list = settings.value("WORK_PATH").toStringList();
+    if (!settings.contains("WORK_PATH"))
+        ui->workDir->addItem(QDir::currentPath());
+
+    tipl::qt::working_dirs << QUrl::fromLocalFile(QStandardPaths::writableLocation(QStandardPaths::DesktopLocation));
+    tipl::qt::working_dirs << QUrl::fromLocalFile(QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation));
+    tipl::qt::working_dirs << QUrl::fromLocalFile(QStandardPaths::writableLocation(QStandardPaths::DownloadLocation));
+
+    for(auto each : workdir_list)
+        if(QFileInfo(each).exists())
+        {
+            ui->workDir->addItem(each);
+            tipl::qt::working_dirs << QUrl::fromLocalFile(each);
+        }
+
     timer = new QTimer(this);
     timer->setInterval(100);
     connect(timer, SIGNAL(timeout()), this, SLOT(training()));
@@ -93,10 +109,29 @@ MainWindow::MainWindow(QWidget *parent)
 
 MainWindow::~MainWindow()
 {
+    QStringList workdir_list;
+    for (int index = 0;index < 10 && index < ui->workDir->count();++index)
+        workdir_list << ui->workDir->itemText(index);
+    std::swap(workdir_list[0],workdir_list[ui->workDir->currentIndex()]);
+    settings.setValue("WORK_PATH", workdir_list);
     settings.setValue("eval_network",ui->evaluate_builtin_networks->currentText());
     qApp->removeEventFilter(this);
     delete ui;
 }
+
+void MainWindow::add_work_dir(QString dir)
+{
+    if(ui->workDir->findText(dir) != -1)
+        ui->workDir->removeItem(ui->workDir->findText(dir));
+    ui->workDir->insertItem(0,dir);
+    ui->workDir->setCurrentIndex(0);
+
+    if(tipl::qt::working_dirs.indexOf(dir) != -1)
+        tipl::qt::working_dirs.remove(tipl::qt::working_dirs.indexOf(dir));
+    tipl::qt::working_dirs << dir;
+
+}
+
 extern console_stream console;
 void MainWindow::on_eval_view_dim_currentIndexChanged(int index)
 {
@@ -122,15 +157,6 @@ void MainWindow::on_eval_label_slider_valueChanged(int value)
 }
 void MainWindow::on_error_x_size_valueChanged(int arg1){plot_error();}
 void MainWindow::on_error_y_size_valueChanged(int arg1){plot_error();}
-
-void MainWindow::on_actionConsole_triggered()
-{
-    static auto* con = new Console(this);
-    con->showNormal();
-}
-
-
-
 void MainWindow::on_evaluate_output_currentIndexChanged(int index)
 {
     if(index != 0)
@@ -153,5 +179,24 @@ void MainWindow::on_template_list_currentIndexChanged(int index)
     }
     else
         ui->atlas_list->hide();
+}
+
+
+void MainWindow::on_browseDir_clicked()
+{
+    QString filename = QFileDialog::getExistingDirectory(this,"Browse Directory",
+                                          ui->workDir->currentText());
+    if ( filename.isEmpty() )
+        return;
+    add_work_dir(filename);
+}
+
+
+void MainWindow::on_console_clicked()
+{
+    static Console* con(0);
+    if(!con)
+        con = new Console(this);
+    con->showNormal();
 }
 

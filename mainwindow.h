@@ -33,7 +33,7 @@ public:
     QStringList evaluate_list;
     void update_evaluate_list(void);
 public:
-    QStringList image_list,image2_list,label_list;
+    QStringList image_list,label_list;
     std::vector<size_t> image_last_added_indices;
 
 
@@ -60,6 +60,7 @@ public:
 public:
     MainWindow(QWidget *parent = nullptr);
     ~MainWindow();
+    void add_work_dir(QString dir);
 private slots:
 
     void training(void);
@@ -93,7 +94,6 @@ private slots:
 
     void plot_error();
     void run_action(QString);
-    void on_actionConsole_triggered();
     void on_evaluate_builtin_networks_currentIndexChanged(int index);
     void on_action_evaluate_option_triggered();
     void on_action_train_options_triggered();
@@ -128,5 +128,7 @@ private slots:
     void on_actionApply_Label_Weights_triggered();
     void on_evaluate_output_currentIndexChanged(int index);
     void on_template_list_currentIndexChanged(int index);
+    void on_browseDir_clicked();
+    void on_console_clicked();
 };
 #endif // MAINWINDOW_H

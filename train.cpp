@@ -13,43 +13,19 @@ using namespace std::chrono_literals;
 bool load_from_file(UNet3d& model,const char* file_name);
 bool save_to_file(UNet3d& model,const char* file_name);
 
-bool read_image_and_label(const std::pair<std::string,std::string>& image_name,
+bool read_image_and_label(const std::string& image_name,
                           const std::string& label_name,tipl::image<3>& input,tipl::image<3>& label)
 {
     std::scoped_lock<std::mutex> lock(tipl::io::nifti_do_not_show_process);
     tipl::matrix<4,4,float> image_t((tipl::identity_matrix()));
     tipl::shape<3> image_dim;
-    {
-        tipl::io::gz_nifti nii(image_name.first,std::ios::in);
-        if(!nii)
-            return tipl::error() << nii.error_msg,false;
-        if(nii.dim(4)!= 1)
-            return tipl::error() << "cannot use multiple channel image",false;
-
-        nii >> image_dim >> image_t >> input;
-
-        if(!image_name.second.empty())
-        {
-            tipl::io::gz_nifti in2(image_name.second,std::ios::in);
-            tipl::shape<3> dim2;
-            if((in2 >> dim2) && dim2 == image_dim)
-            {
-                input.resize(image_dim.multiply(tipl::shape<3>::z,2));
-                auto I = input.alias(image_dim.size(),image_dim);
-                in2 >> I;
-            }
-            else
-                return tipl::error() << "second modality does not match dimension:" + image_name.second,false;
-        }
-    }
-
-    tipl::io::gz_nifti nii(label_name,std::ios::in);
-    if(!nii)
-        return tipl::error() << nii.error_msg,false;
+    if(!(tipl::io::gz_nifti(image_name,std::ios::in) >> image_dim >> image_t >> input >> [&](const std::string& e)
+          {tipl::error() << e;}))
+        return false;
     label.clear();
     label.resize(image_dim);
-    nii.to_space<tipl::majority>(label,image_t);
-    return true;
+    return tipl::io::gz_nifti(label_name,std::ios::in).to_space<tipl::majority>(label,image_t) >>
+           [&](const std::string& e){tipl::error() << e;};
 }
 
 
@@ -79,106 +55,66 @@ void preprocessing(tipl::image<3>& image,tipl::image<3>& label,tipl::shape<3> to
         new_image.swap(image);
     }
 }
-void simulate_modality(tipl::image<3>& t1w, // stores T1w or [T1w,T2w]
+
+void simulate_modality(tipl::image<3>& t1w,
                        const tipl::image<3>& label,
                        unsigned int max_label,
                        unsigned int seed)
 {
-    // Assumption:
-    // t1w stores either T1w or concatenated [T1w,T2w].
-    // T1w and T2w are already normalized to [0,1].
-    // label stores integer-like labels: 0..max_label.
+    // t1w is already normalized to [0,1].
+    // label stores integer values 0..max_label.
     constexpr size_t term_count = 20;
-
-    const size_t n_voxel = label.size();
-    const bool has_t2 = t1w.size() >= n_voxel*2;
-    tipl::image<3,float> tissue(label.shape());
 
     tipl::uniform_dist<int> rand_int(seed);
     tipl::uniform_dist<float> rand_float(0.0f,1.0f,seed+1);
 
-
-    auto get_t2 = [&](size_t i)
-    {
-        return t1w[n_voxel+i];
-    };
-
-    // label-derived tissue modality
-    std::vector<float> lut(max_label+1,0.4f);
-    for(unsigned int i = 1;i <= max_label;++i)
-        lut[i] = 0.4f + rand_float()*0.2f;
-
-    for(size_t i = 0;i < n_voxel;++i)
-        tissue[i] = lut[std::clamp<int>(int(label[i]),0,int(max_label))];
+    tipl::image<3> tissue(label.shape());
+    std::vector<float> lut(max_label+1);
+    for(auto& v : lut)
+        v = 0.4f + rand_float()*0.2f;
+    for(size_t i = 0;i < label.size();++i)
+        tissue[i] = lut[int(label[i])];
 
     tipl::filter::gaussian(tissue);
     tipl::filter::gaussian(tissue);
 
-    struct term_type
-    {
-        unsigned char a,b,c,d,e,f;
-        float w;
-    };
-
+    struct term_type { uint8_t a,b,c,d; float w; };
     std::array<term_type,term_count> terms;
     for(auto& t : terms)
     {
         do
         {
-            t.a = uint8_t(rand_int(4));                 // T1
-            t.b = has_t2 ? uint8_t(rand_int(4)) : 0;    // optional T2
-            t.c = uint8_t(rand_int(4));                 // tissue
+            t.a = uint8_t(rand_int(4));
+            t.b = uint8_t(rand_int(4));
         }
-        while(t.a+t.b+t.c == 0);
-
-        t.d = uint8_t(rand_int(has_t2 ? 3 : 4));        // 1-T1
-        t.e = has_t2 ? uint8_t(rand_int(3)) : 0;        // optional 1-T2
-        t.f = uint8_t(rand_int(has_t2 ? 3 : 4));        // 1-tissue
+        while(t.a+t.b == 0);
+        t.c = uint8_t(rand_int(4));
+        t.d = uint8_t(rand_int(4));
         t.w = rand_float();
     }
 
-    float gamma = 0.6f + 1.2f*rand_float();
-
+    const float gamma = 0.6f + 1.2f*rand_float();
     float mn = std::numeric_limits<float>::max();
-    float mx = -std::numeric_limits<float>::max();
+    float mx = -mn;
 
-    for(size_t i = 0;i < n_voxel;++i)
+    for(size_t i = 0;i < t1w.size();++i)
     {
-        const float x = t1w[i]; // original T1 before overwrite
-        const bool mask = x > 0.02f || (has_t2 && get_t2(i) > 0.02f);
-
-        if(!mask)
+        const float x = t1w[i];
+        if(x <= 0.02f)
         {
             t1w[i] = 0.0f;
             continue;
         }
 
-        float z = tissue[i];
-        float rx = 1.0f-x;
-        float rz = 1.0f-z;
-
-        float px[4] = {1.0f,x,x*x,x*x*x};
-        float pz[4] = {1.0f,z,z*z,z*z*z};
-        float qx[4] = {1.0f,rx,rx*rx,rx*rx*rx};
-        float qz[4] = {1.0f,rz,rz*rz,rz*rz*rz};
-
-        float py[4] = {1.0f,1.0f,1.0f,1.0f};
-        float qy[3] = {1.0f,1.0f,1.0f};
-
-        if(has_t2)
-        {
-            float y = get_t2(i);
-            float ry = 1.0f-y;
-            py[1] = y;
-            py[2] = y*y;
-            py[3] = y*y*y;
-            qy[1] = ry;
-            qy[2] = ry*ry;
-        }
+        const float z = tissue[i], rx = 1.0f-x, rz = 1.0f-z;
+        const float px[4] = {1.0f,x,x*x,x*x*x};
+        const float pz[4] = {1.0f,z,z*z,z*z*z};
+        const float qx[4] = {1.0f,rx,rx*rx,rx*rx*rx};
+        const float qz[4] = {1.0f,rz,rz*rz,rz*rz*rz};
 
         float s = 0.0f;
         for(const auto& t : terms)
-            s += t.w*px[t.a]*py[t.b]*pz[t.c]*qx[t.d]*qy[t.e]*qz[t.f];
+            s += t.w*px[t.a]*pz[t.b]*qx[t.c]*qz[t.d];
 
         t1w[i] = std::pow(s,gamma);
         if(label[i])
@@ -187,9 +123,6 @@ void simulate_modality(tipl::image<3>& t1w, // stores T1w or [T1w,T2w]
             mx = std::max(mx,t1w[i]);
         }
     }
-
-    if(has_t2)
-        t1w.resize(label.shape());
 
     if(mx > mn)
     {
@@ -227,12 +160,11 @@ void train_unet::read_file(void)
     {
         std::vector<char> train_image_is_template(std::vector<char>(param.image_file_name.size(),false));
 
-        size_t num_of_2nd_modality = 0;
         for(size_t i = 0,sz = param.image_file_name.size();i<sz;++i)
         {
-            reading_status = "checking "+ param.image_file_name[i].first;
+            reading_status = "checking "+ param.image_file_name[i];
             bool is_mni = false;
-            if(!(tipl::io::gz_nifti(param.image_file_name[i].first.c_str(),std::ios::in) >> is_mni >>
+            if(!(tipl::io::gz_nifti(param.image_file_name[i].c_str(),std::ios::in) >> is_mni >>
                 [&](const std::string& e){error_msg = e,aborted = true;}))
                 return;
             if((train_image_is_template[i] = is_mni))
@@ -241,8 +173,6 @@ void train_unet::read_file(void)
                 param.test_image_file_name.push_back(param.image_file_name[i]);
                 param.test_label_file_name.push_back(param.label_file_name[i]);
             }
-            if(!param.image_file_name[i].second.empty())
-                ++num_of_2nd_modality;
         }
 
         std::vector<size_t> template_indices;
@@ -256,7 +186,6 @@ void train_unet::read_file(void)
         }
 
         tipl::out() << "a total of " << param.image_file_name.size() << " training dataset\n";
-        tipl::out() << "a total of " << num_of_2nd_modality << " second modality image\n";
         tipl::out() << "a total of " << param.test_image_file_name.size() << " testing dataset\n";
 
         for(int read_id = 0,sz = param.test_image_file_name.size();read_id<sz && !aborted;++read_id)
@@ -264,12 +193,12 @@ void train_unet::read_file(void)
             while(pause)
                 if(aborted) return; else std::this_thread::sleep_for(100ms);
 
-            reading_status = "reading "+std::filesystem::path(param.test_image_file_name[read_id].first).filename().string()+" and "+std::filesystem::path(param.test_label_file_name[read_id]).filename().string();
+            reading_status = "reading "+std::filesystem::path(param.test_image_file_name[read_id]).filename().string();
 
             tipl::image<3> input_image,input_label;
             if(!read_image_and_label(param.test_image_file_name[read_id],
                                      param.test_label_file_name[read_id],input_image,input_label))
-                return error_msg = "cannot read image or label data for "+std::filesystem::path(param.test_image_file_name[read_id].first).filename().string(),aborted = true,void();
+                return error_msg = "cannot read image or label data for "+std::filesystem::path(param.test_image_file_name[read_id]).filename().string(),aborted = true,void();
 
             preprocessing(input_image,input_label,model->dim);
 
@@ -305,10 +234,10 @@ void train_unet::read_file(void)
 
             if(train_image[read_id].empty())
             {
-                reading_status = "reading "+std::filesystem::path(param.image_file_name[read_id].first).filename().string()+
+                reading_status = "reading "+std::filesystem::path(param.image_file_name[read_id]).filename().string()+
                                  " and "+std::filesystem::path(param.label_file_name[read_id]).filename().string();
                 if(!read_image_and_label(param.image_file_name[read_id],param.label_file_name[read_id],image,label))
-                    return error_msg = "cannot read image or label data for "+std::filesystem::path(param.image_file_name[read_id].first).filename().string(),aborted = true,void();
+                    return error_msg = "cannot read image or label data for "+std::filesystem::path(param.image_file_name[read_id]).filename().string(),aborted = true,void();
                 reading_status = "preprocessing";
                 preprocessing(image,label,model->dim);
                 if(!param.is_label)
@@ -359,7 +288,7 @@ void train_unet::read_file(void)
 
                 {
                     std::lock_guard<std::mutex> lock(m);
-                    augmentation_status = "augmenting "+std::filesystem::path(param.image_file_name[read_id].first).filename().string();
+                    augmentation_status = "augmenting "+std::filesystem::path(param.image_file_name[read_id]).filename().string();
                 }
 
                 visual_perception_augmentation(param.options,in_data_thread,out_data_thread,param.is_label,model->dim,in_file_seed[thread]);
@@ -752,7 +681,7 @@ void train_unet::start(void)
 
     if(model->errors.empty() || !model->optimizer.get())
     {
-        tipl::out() << "current epoch: " << model->errors.size();
+        tipl::out() << "current epoch: " << model->errors.size()/3;
         model->create_optimizer(param.learning_rate);
         if(std::filesystem::exists(model_path+".opt"))
         {
@@ -850,129 +779,7 @@ std::string default_feature(int out_count)
             "conv16,ks3,stride1+norm,leaky_relu+conv16,ks3,stride1+norm,leaky_relu+" + out;
 }
 
-std::vector<std::pair<std::string,std::string> > pair_image_files(const std::vector<std::string>& file_list)
-{
-    auto file_name = [](const std::string& s)
-    {
-        return std::filesystem::path(s).filename().string();
-    };
-    auto lower = [](std::string s)
-    {
-        std::transform(s.begin(),s.end(),s.begin(),[](unsigned char c){return std::tolower(c);});
-        return s;
-    };
-    auto t_pos = [&](const std::string& s)
-    {
-        auto name = lower(file_name(s));
-        auto p1 = name.find("t1"), p2 = name.find("t2");
-        if(p1 == std::string::npos) return p2;
-        if(p2 == std::string::npos) return p1;
-        return std::min(p1,p2);
-    };
 
-    std::vector<std::pair<std::string,std::string> > pairs;
-    std::vector<unsigned char> used(file_list.size());
-
-    for(size_t i = 0;i < file_list.size();++i)
-    {
-        if(used[i])
-            continue;
-
-        auto p = t_pos(file_list[i]);
-        if(p == std::string::npos || !p)
-            continue;
-
-        auto prefix = lower(file_name(file_list[i])).substr(0,p);
-        std::vector<size_t> group;
-        for(size_t j = 0;j < file_list.size();++j)
-            if(!used[j] && lower(file_name(file_list[j])).find(prefix) == 0)
-                group.push_back(j);
-
-        if(group.size() != 2)
-            continue;
-
-        pairs.push_back({file_list[group[0]],file_list[group[1]]});
-        used[group[0]] = used[group[1]] = 1;
-    }
-
-    for(size_t i = 0;i < file_list.size();++i)
-        if(!used[i])
-            pairs.push_back({file_list[i],std::string()});
-
-    return pairs;
-}
-
-
-bool pair_label_files(const std::vector<std::pair<std::string,std::string> >& images,
-                      std::vector<std::string>& labels)
-{
-    auto file_name = [](const std::string& s)
-    {
-        return std::filesystem::path(s).filename().string();
-    };
-
-    auto lower = [](std::string s)
-    {
-        std::transform(s.begin(),s.end(),s.begin(),
-                       [](unsigned char c){return std::tolower(c);});
-        return s;
-    };
-
-    auto t_pos = [&](const std::string& s)
-    {
-        auto name = lower(file_name(s));
-        auto p1 = name.find("t1");
-        auto p2 = name.find("t2");
-        if(p1 == std::string::npos)
-            return p2;
-        if(p2 == std::string::npos)
-            return p1;
-        return std::min(p1,p2);
-    };
-
-    auto prefix_of = [&](const std::pair<std::string,std::string>& p)
-    {
-        for(auto* s : {&p.first,&p.second})
-        {
-            if(s->empty())
-                continue;
-            auto pos = t_pos(*s);
-            if(pos != std::string::npos && pos)
-                return lower(file_name(*s)).substr(0,pos);
-        }
-        return std::string();
-    };
-
-    if(images.size() != labels.size())
-        return tipl::error() << "failed to pair: image/label count mismatch",false;
-
-    std::vector<std::string> new_labels(images.size());
-    std::vector<unsigned char> used(labels.size());
-
-    for(size_t i = 0;i < images.size();++i)
-    {
-        auto prefix = prefix_of(images[i]);
-        if(prefix.empty())
-            return tipl::error() << "failed to pair " << images[i].first,false;
-
-        int found = -1;
-        for(size_t j = 0;j < labels.size();++j)
-        {
-            auto name = lower(file_name(labels[j]));
-            if(!used[j] && name.rfind(prefix,0) == 0)
-                found = found == -1 ? int(j) : -2;
-        }
-
-        if(found < 0)
-            return tipl::error() << "failed to pair " << images[i].first,false;
-
-        new_labels[i] = labels[found];
-        used[found] = 1;
-    }
-
-    labels.swap(new_labels);
-    return true;
-}
 int tra(void)
 {
     static train_unet train;
@@ -995,12 +802,8 @@ int tra(void)
     tipl::progress p("start training");
 
     {
-        train.param.image_file_name = pair_image_files(po.get_files("source"));
-
+        train.param.image_file_name = po.get_files("source");
         train.param.label_file_name = po.get_files("label");
-
-        if(!pair_label_files(train.param.image_file_name,train.param.label_file_name))
-            return 1;
         if(train.param.image_file_name.empty()||train.param.label_file_name.empty())
             return tipl::error() << "please specify training data using --source and --label",1;
 
@@ -1008,8 +811,7 @@ int tra(void)
             return tipl::error() << "different number of files found for image and label",1;
 
         for(size_t i = 0,sz = train.param.image_file_name.size();i<sz;++i)
-            tipl::out() << std::filesystem::path(train.param.image_file_name[i].first).filename().string() << "+" <<
-                           std::filesystem::path(train.param.image_file_name[i].second).filename().string() <<
+            tipl::out() << std::filesystem::path(train.param.image_file_name[i]).filename().string() <<
                            "=>" << std::filesystem::path(train.param.label_file_name[i]).filename().string();
     }
 
@@ -1037,9 +839,9 @@ int tra(void)
         tipl::vector<3> vs;
 
         if(!(tipl::io::gz_nifti(train.param.label_file_name[0],std::ios::in) >> I >>
-            [&](auto& e){tipl::error() << "cannot load label file: " << e;}) ||
-            !(tipl::io::gz_nifti(train.param.image_file_name[0].first,std::ios::in) >> dim >> vs >>
-            [&](auto& e){tipl::error() << "cannot load image file: " << e;}))
+            [&](const auto& e){tipl::error() << "cannot load label file: " << e;}) ||
+            !(tipl::io::gz_nifti(train.param.image_file_name[0],std::ios::in) >> dim >> vs >>
+            [&](const auto& e){tipl::error() << "cannot load image file: " << e;}))
             return 1;
 
         size_t in_count = po.get("in_count",1);
