@@ -7,6 +7,7 @@
         <file>icons/delete.png</file>
         <file>icons/processing.gif</file>
         <file>unet-studio.ico</file>
+        <file>icons/console.xpm</file>
     </qresource>
     <qresource prefix="/">
         <file>options.txt</file>
